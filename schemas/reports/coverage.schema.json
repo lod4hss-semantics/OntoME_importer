@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lod4hss.org/ontome-importer/schemas/coverage-1.0.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["format_version", "entries"],
+  "properties": {"format_version": {"const": "1.0"}, "entries": {"type": "array", "items": {"$ref": "#/$defs/entry"}}},
+  "$defs": {
+    "entry": {"type": "object", "additionalProperties": false, "required": ["id", "status", "construct", "resource", "example", "provenance", "generation_impact"], "properties": {"id": {"type": "string"}, "status": {"enum": ["mapped", "configured", "excluded", "blocked", "invalid"]}, "construct": {"type": "string"}, "resource": {"type": "string"}, "example": {"type": "string"}, "provenance": {"type": "object"}, "mapping_rule": {"type": "string"}, "decision_needed": {"type": "string"}, "generation_impact": {"enum": ["included", "excluded", "blocks_generation"]}}}
+  }
+}

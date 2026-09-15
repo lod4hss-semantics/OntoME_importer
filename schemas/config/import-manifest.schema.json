@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lod4hss.org/ontome-importer/schemas/import-manifest-1.0.json",
+  "title": "Import manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format_version", "source", "target", "profiles", "strict"],
+  "properties": {
+    "format_version": {"const": "1.0"},
+    "source": {
+      "type": "object", "additionalProperties": false,
+      "required": ["file"],
+      "properties": {
+        "file": {"type": "string", "minLength": 1},
+        "uri": {"type": "string", "format": "uri"},
+        "format": {"type": "string", "minLength": 1},
+        "version": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      }
+    },
+    "target": {
+      "type": "object", "additionalProperties": false,
+      "required": ["namespace_uri", "labels"],
+      "properties": {
+        "namespace_uri": {"type": "string", "format": "uri"},
+        "ontome_namespace_id": {"type": "integer", "minimum": 1},
+        "labels": {"$ref": "#/$defs/localized_values"},
+        "version": {"type": "string"},
+        "published_at": {"type": "string", "format": "date-time"},
+        "contributors": {"type": "string"},
+        "descriptions": {"$ref": "#/$defs/localized_values"}
+      }
+    },
+    "profiles": {
+      "type": "object", "additionalProperties": false,
+      "required": ["capability", "namespace_registry", "mapping"],
+      "properties": {
+        "capability": {"type": "string", "minLength": 1},
+        "namespace_registry": {"type": "string", "minLength": 1},
+        "mapping": {"type": "string", "minLength": 1}
+      }
+    },
+    "strict": {"const": true},
+    "output_directory": {"type": "string", "minLength": 1}
+  },
+  "$defs": {
+    "localized_values": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["lang", "value"],
+        "properties": {"lang": {"type": "string", "pattern": "^[A-Za-z]{2,3}([_-][A-Za-z0-9]+)*$"}, "value": {"type": "string", "minLength": 1}}
+      }
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "format_version": "1.0",
+  "entries": [
+    {
+      "xml_path": "/namespace/classes/class[1]/standardLabel[1]",
+      "source_resource": "https://example.org/source/ontology/Term",
+      "source_assertions": ["assertion-0001"],
+      "mapping_rule": "map-example-term",
+      "value": "Example term"
+    }
+  ]
+}

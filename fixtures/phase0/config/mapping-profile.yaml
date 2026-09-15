@@ -1,0 +1,10 @@
+format_version: "1.0"
+scope:
+  resource_selectors:
+    - uri_prefix: https://example.org/source/ontology/
+rules:
+  - id: exclude-example-anonymous-structure
+    selector:
+      uri: https://example.org/source/ontology/anonymous-structure
+    action: exclude
+    reason: Synthetic fixture for an explicit documented exclusion.

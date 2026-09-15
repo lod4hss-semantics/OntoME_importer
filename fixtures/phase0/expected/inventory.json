@@ -1,0 +1,22 @@
+{
+  "format_version": "1.0",
+  "source": {"file": "fixtures/rdf/example.ttl"},
+  "resources": [
+    {
+      "id": {"kind": "uri", "value": "https://example.org/source/ontology/Term"},
+      "types": [
+        {"kind": "uri", "value": "https://example.org/vocabulary/TypeA"},
+        {"kind": "uri", "value": "https://example.org/vocabulary/TypeB"}
+      ],
+      "assertion_indexes": [0]
+    }
+  ],
+  "triples": [
+    {
+      "subject": {"kind": "uri", "value": "https://example.org/source/ontology/Term"},
+      "predicate": {"kind": "uri", "value": "https://example.org/vocabulary/unknownPredicate"},
+      "object": {"kind": "literal", "value": "example", "language": "en"},
+      "provenance": {"file": "fixtures/rdf/example.ttl"}
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lod4hss.org/ontome-importer/schemas/inventory-1.0.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["format_version", "source", "resources", "triples"],
+  "properties": {
+    "format_version": {"const": "1.0"},
+    "source": {"type": "object", "required": ["file"], "properties": {"file": {"type": "string"}}, "additionalProperties": true},
+    "resources": {"type": "array", "items": {"$ref": "#/$defs/resource"}},
+    "triples": {"type": "array", "items": {"$ref": "#/$defs/triple"}}
+  },
+  "$defs": {
+    "term": {"type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": {"kind": {"enum": ["uri", "blank_node", "literal"]}, "value": {"type": "string"}, "language": {"type": "string"}, "datatype": {"type": "string"}}},
+    "provenance": {"type": "object", "additionalProperties": false, "required": ["file"], "properties": {"file": {"type": "string"}, "line": {"type": "integer", "minimum": 1}, "column": {"type": "integer", "minimum": 1}}},
+    "triple": {"type": "object", "additionalProperties": false, "required": ["subject", "predicate", "object", "provenance"], "properties": {"subject": {"$ref": "#/$defs/term"}, "predicate": {"$ref": "#/$defs/term"}, "object": {"$ref": "#/$defs/term"}, "provenance": {"$ref": "#/$defs/provenance"}}},
+    "resource": {"type": "object", "additionalProperties": false, "required": ["id", "types", "assertion_indexes"], "properties": {"id": {"$ref": "#/$defs/term"}, "types": {"type": "array", "items": {"$ref": "#/$defs/term"}}, "assertion_indexes": {"type": "array", "items": {"type": "integer", "minimum": 0}}}}
+  }
+}

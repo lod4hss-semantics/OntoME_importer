@@ -1,0 +1,15 @@
+{
+  "format_version": "1.0",
+  "entries": [
+    {
+      "id": "assertion-0001",
+      "status": "blocked",
+      "construct": "unknown_predicate",
+      "resource": "https://example.org/source/ontology/Term",
+      "example": "<https://example.org/source/ontology/Term> <https://example.org/vocabulary/unknownPredicate> \"example\"@en .",
+      "provenance": {"file": "fixtures/rdf/example.ttl"},
+      "decision_needed": "Add a mapping rule or explicitly exclude this assertion.",
+      "generation_impact": "blocks_generation"
+    }
+  ]
+}

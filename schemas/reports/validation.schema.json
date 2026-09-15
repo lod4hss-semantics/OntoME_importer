@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lod4hss.org/ontome-importer/schemas/validation-1.0.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["format_version", "valid", "checks"],
+  "properties": {"format_version": {"const": "1.0"}, "valid": {"type": "boolean"}, "checks": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["name", "valid"], "properties": {"name": {"type": "string"}, "valid": {"type": "boolean"}, "message": {"type": "string"}, "location": {"type": "string"}}}}}
+}

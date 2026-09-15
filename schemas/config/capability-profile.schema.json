@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lod4hss.org/ontome-importer/schemas/capability-profile-1.0.json",
+  "title": "OntoME capability profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format_version", "xsd", "xml", "constructs", "unknown_construct_policy"],
+  "properties": {
+    "format_version": {"const": "1.0"},
+    "xsd": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "version", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "version": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      }
+    },
+    "xml": {
+      "type": "object", "additionalProperties": false,
+      "required": ["root", "class_fields", "property_fields"],
+      "properties": {
+        "root": {"const": "namespace"},
+        "class_fields": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "property_fields": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+      }
+    },
+    "constructs": {
+      "type": "object",
+      "additionalProperties": {"enum": ["supported", "blocked"]}
+    },
+    "unknown_construct_policy": {"const": "blocked"}
+  }
+}

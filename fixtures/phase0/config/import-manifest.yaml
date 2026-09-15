@@ -1,0 +1,17 @@
+format_version: "1.0"
+source:
+  file: fixtures/rdf/example.ttl
+  uri: https://example.org/source/ontology
+  format: turtle
+  version: "1.0"
+target:
+  namespace_uri: https://example.org/target/namespace/
+  labels:
+    - lang: en
+      value: Example namespace
+profiles:
+  capability: profiles/capabilities/ontome-import-2026-09-15.yaml
+  namespace_registry: fixtures/phase0/config/namespace-registry.yaml
+  mapping: fixtures/phase0/config/mapping-profile.yaml
+strict: true
+output_directory: output
