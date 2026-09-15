@@ -18,6 +18,7 @@ pytest
 ```
 
 Phase 0 contracts are documented in [docs/phase-0-contracts.md](docs/phase-0-contracts.md).
+The supported RDF inventory formats are documented in [docs/phase-2-rdf-inventory.md](docs/phase-2-rdf-inventory.md).
 
 ## CLI
 

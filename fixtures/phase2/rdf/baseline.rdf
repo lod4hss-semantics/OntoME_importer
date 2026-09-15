@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns:ex="https://example.org/vocabulary/"
+         xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+         xml:base="https://example.org/source/">
+  <rdf:Description rdf:about="Term">
+    <rdf:type rdf:resource="https://example.org/vocabulary/TypeA"/>
+    <rdf:type rdf:resource="https://example.org/vocabulary/TypeB"/>
+    <ex:unknownPredicate xml:lang="en">example</ex:unknownPredicate>
+    <ex:related rdf:resource="Other"/>
+    <ex:typed rdf:datatype="http://www.w3.org/2001/XMLSchema#integer">42</ex:typed>
+    <ex:note>plain</ex:note>
+    <ex:hasPart rdf:nodeID="part"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="part">
+    <ex:name>nested</ex:name>
+  </rdf:Description>
+</rdf:RDF>

@@ -1,0 +1,10 @@
+@base <https://example.org/source/> .
+@prefix ex: <https://example.org/vocabulary/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+<Term> a ex:TypeA, ex:TypeB ;
+    ex:unknownPredicate "example"@en ;
+    ex:related <Other> ;
+    ex:typed "42"^^xsd:integer ;
+    ex:note "plain" ;
+    ex:hasPart [ ex:name "nested" ] .

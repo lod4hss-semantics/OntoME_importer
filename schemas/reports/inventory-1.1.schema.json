@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lod4hss.org/ontome-importer/schemas/inventory-1.1.json",
+  "title": "RDF inventory",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format_version", "source", "resources", "triples"],
+  "properties": {
+    "format_version": {"const": "1.1"},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "format", "sha256"],
+      "properties": {
+        "file": {"type": "string", "minLength": 1},
+        "format": {"enum": ["turtle", "rdfxml", "ntriples"]},
+        "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "uri": {"type": "string", "format": "uri"},
+        "version": {"type": "string", "minLength": 1}
+      }
+    },
+    "resources": {"type": "array", "items": {"$ref": "#/$defs/resource"}},
+    "triples": {"type": "array", "items": {"$ref": "#/$defs/triple"}}
+  },
+  "$defs": {
+    "uri_term": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "value"],
+      "properties": {"kind": {"const": "uri"}, "value": {"type": "string", "format": "uri"}}
+    },
+    "blank_node_term": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "value"],
+      "properties": {"kind": {"const": "blank_node"}, "value": {"type": "string", "pattern": "^b[0-9]+$"}}
+    },
+    "literal_term": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "value"],
+      "properties": {
+        "kind": {"const": "literal"},
+        "value": {"type": "string"},
+        "language": {"type": "string", "minLength": 1},
+        "datatype": {"type": "string", "format": "uri"}
+      },
+      "not": {"required": ["language", "datatype"]}
+    },
+    "term": {"oneOf": [{"$ref": "#/$defs/uri_term"}, {"$ref": "#/$defs/blank_node_term"}, {"$ref": "#/$defs/literal_term"}]},
+    "resource_term": {"oneOf": [{"$ref": "#/$defs/uri_term"}, {"$ref": "#/$defs/blank_node_term"}]},
+    "triple": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "subject", "predicate", "object", "provenance"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^triple-[a-f0-9]{64}$"},
+        "subject": {"$ref": "#/$defs/resource_term"},
+        "predicate": {"$ref": "#/$defs/uri_term"},
+        "object": {"$ref": "#/$defs/term"},
+        "provenance": {
+          "type": "object", "additionalProperties": false,
+          "required": ["file"],
+          "properties": {"file": {"type": "string", "minLength": 1}}
+        }
+      }
+    },
+    "resource": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "types", "outgoing_assertion_ids"],
+      "properties": {
+        "id": {"$ref": "#/$defs/resource_term"},
+        "types": {"type": "array", "items": {"$ref": "#/$defs/resource_term"}},
+        "outgoing_assertion_ids": {"type": "array", "items": {"type": "string", "pattern": "^triple-[a-f0-9]{64}$"}}
+      }
+    }
+  }
+}

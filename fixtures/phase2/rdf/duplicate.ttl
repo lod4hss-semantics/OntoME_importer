@@ -1,0 +1,4 @@
+@prefix ex: <https://example.org/vocabulary/> .
+
+ex:Term ex:related ex:Other .
+ex:Term ex:related ex:Other .

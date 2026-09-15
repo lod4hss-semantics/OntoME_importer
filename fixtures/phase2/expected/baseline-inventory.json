@@ -1,0 +1,25 @@
+{
+  "format_version": "1.1",
+  "source": {
+    "file": "fixtures/phase2/rdf/baseline.ttl",
+    "format": "turtle",
+    "sha256": "601a29e8e09868c3bda1fe9d80759f2a748d231e406c029ccca12b782e88a3f4"
+  },
+  "resources": [
+    {"id": {"kind": "blank_node", "value": "b0"}, "types": [], "outgoing_assertion_ids": ["triple-a0659fb39b57db593905c89ed7810b0d3202b8832105306d15cba634796accd5"]},
+    {"id": {"kind": "uri", "value": "https://example.org/source/Other"}, "types": [], "outgoing_assertion_ids": []},
+    {"id": {"kind": "uri", "value": "https://example.org/source/Term"}, "types": [{"kind": "uri", "value": "https://example.org/vocabulary/TypeA"}, {"kind": "uri", "value": "https://example.org/vocabulary/TypeB"}], "outgoing_assertion_ids": ["triple-0be406a14e5bcdb317bb57b19345f883f5eac8ea7d56a6afb7398a967fb3e6af", "triple-3536556ca5b8bcbf2470036f0fe619031ab7b42de297cd83e0dc554a0fd031fd", "triple-851f617b27b723659c6b7673b6d3ffb233fec32cf4d100c3eda7c96aee1fb50c", "triple-8bbb4e40aebba13bee1f616b3c4ef59709e3231433d792dd95a4d19990225f87", "triple-9b876bde8215ec90e88093ee176c5145420dfce7bd4d4de1d5c6578f72f08ed9", "triple-c0e02ecd37b2b6042000968ac816fbafb72a8eae87408ec1dcac30b7f8262267", "triple-f68e1b7abd962e8588e0b32f3ed0734c9f4e6b573c17519b9a5a1866971fb8a4"]},
+    {"id": {"kind": "uri", "value": "https://example.org/vocabulary/TypeA"}, "types": [], "outgoing_assertion_ids": []},
+    {"id": {"kind": "uri", "value": "https://example.org/vocabulary/TypeB"}, "types": [], "outgoing_assertion_ids": []}
+  ],
+  "triples": [
+    {"id": "triple-0be406a14e5bcdb317bb57b19345f883f5eac8ea7d56a6afb7398a967fb3e6af", "subject": {"kind": "uri", "value": "https://example.org/source/Term"}, "predicate": {"kind": "uri", "value": "https://example.org/vocabulary/hasPart"}, "object": {"kind": "blank_node", "value": "b0"}, "provenance": {"file": "fixtures/phase2/rdf/baseline.ttl"}},
+    {"id": "triple-3536556ca5b8bcbf2470036f0fe619031ab7b42de297cd83e0dc554a0fd031fd", "subject": {"kind": "uri", "value": "https://example.org/source/Term"}, "predicate": {"kind": "uri", "value": "https://example.org/vocabulary/note"}, "object": {"kind": "literal", "value": "plain"}, "provenance": {"file": "fixtures/phase2/rdf/baseline.ttl"}},
+    {"id": "triple-851f617b27b723659c6b7673b6d3ffb233fec32cf4d100c3eda7c96aee1fb50c", "subject": {"kind": "uri", "value": "https://example.org/source/Term"}, "predicate": {"kind": "uri", "value": "https://example.org/vocabulary/unknownPredicate"}, "object": {"kind": "literal", "value": "example", "language": "en"}, "provenance": {"file": "fixtures/phase2/rdf/baseline.ttl"}},
+    {"id": "triple-8bbb4e40aebba13bee1f616b3c4ef59709e3231433d792dd95a4d19990225f87", "subject": {"kind": "uri", "value": "https://example.org/source/Term"}, "predicate": {"kind": "uri", "value": "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"}, "object": {"kind": "uri", "value": "https://example.org/vocabulary/TypeA"}, "provenance": {"file": "fixtures/phase2/rdf/baseline.ttl"}},
+    {"id": "triple-9b876bde8215ec90e88093ee176c5145420dfce7bd4d4de1d5c6578f72f08ed9", "subject": {"kind": "uri", "value": "https://example.org/source/Term"}, "predicate": {"kind": "uri", "value": "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"}, "object": {"kind": "uri", "value": "https://example.org/vocabulary/TypeB"}, "provenance": {"file": "fixtures/phase2/rdf/baseline.ttl"}},
+    {"id": "triple-a0659fb39b57db593905c89ed7810b0d3202b8832105306d15cba634796accd5", "subject": {"kind": "blank_node", "value": "b0"}, "predicate": {"kind": "uri", "value": "https://example.org/vocabulary/name"}, "object": {"kind": "literal", "value": "nested"}, "provenance": {"file": "fixtures/phase2/rdf/baseline.ttl"}},
+    {"id": "triple-c0e02ecd37b2b6042000968ac816fbafb72a8eae87408ec1dcac30b7f8262267", "subject": {"kind": "uri", "value": "https://example.org/source/Term"}, "predicate": {"kind": "uri", "value": "https://example.org/vocabulary/typed"}, "object": {"kind": "literal", "value": "42", "datatype": "http://www.w3.org/2001/XMLSchema#integer"}, "provenance": {"file": "fixtures/phase2/rdf/baseline.ttl"}},
+    {"id": "triple-f68e1b7abd962e8588e0b32f3ed0734c9f4e6b573c17519b9a5a1866971fb8a4", "subject": {"kind": "uri", "value": "https://example.org/source/Term"}, "predicate": {"kind": "uri", "value": "https://example.org/vocabulary/related"}, "object": {"kind": "uri", "value": "https://example.org/source/Other"}, "provenance": {"file": "fixtures/phase2/rdf/baseline.ttl"}}
+  ]
+}
