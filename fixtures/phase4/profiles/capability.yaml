@@ -1,0 +1,22 @@
+format_version: "1.0"
+xsd:
+  path: resources/xsd/ontome-import-2026-09-15.xsd
+  version: "2026-09-15"
+  sha256: d7d41c320feddace63f67fe664cb7f869b30230915cd3faee5bc92aacf7ab1a9
+xml:
+  root: namespace
+  class_fields: [identifierInNamespace, identifierInURI, standardLabel, subClassOf, parentClassOf, equivalentClass, disjointWith, textProperties]
+  property_fields: [identifierInNamespace, identifierInURI, label, subPropertyOf, parentPropertyOf, equivalentProperty, inverseOf, hasDomain, hasRange, domainInstancesMinQuantifier, domainInstancesMaxQuantifier, rangeInstancesMinQuantifier, rangeInstancesMaxQuantifier, textProperties]
+constructs:
+  owl_class: supported
+  object_property: supported
+  datatype_property: supported
+  rdf_property: supported
+  label: supported
+  comment: supported
+  subclass_of: supported
+  equivalent_class: supported
+  inverse_of: supported
+  named_domain: supported
+  named_range: supported
+unknown_construct_policy: blocked

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lod4hss.org/ontome-importer/schemas/import-manifest-1.1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format_version", "source", "target", "profiles", "strict"],
+  "properties": {
+    "format_version": {"const": "1.1"},
+    "source": {"type": "object", "additionalProperties": false, "required": ["file", "format"], "properties": {"file": {"type": "string", "minLength": 1}, "format": {"enum": ["turtle", "rdfxml", "ntriples"]}, "uri": {"type": "string", "format": "uri"}, "version": {"type": "string"}, "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}},
+    "target": {"type": "object", "additionalProperties": true, "required": ["namespace_uri"], "properties": {"namespace_uri": {"type": "string", "format": "uri"}}},
+    "profiles": {"type": "object", "additionalProperties": false, "required": ["capability", "namespace_registry", "mapping"], "properties": {"capability": {"type": "string", "minLength": 1}, "namespace_registry": {"type": "string", "minLength": 1}, "mapping": {"type": "string", "minLength": 1}}},
+    "strict": {"const": true}
+  }
+}

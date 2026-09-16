@@ -1,0 +1,9 @@
+@prefix ex: <https://example.org/source/> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+ex:Class a owl:Class ; rdfs:label "Class"@en .
+ex:Parent a owl:Class ; rdfs:label "Parent"@en .
+ex:property a owl:ObjectProperty ;
+  rdfs:label "property"@en ;
+  rdfs:domain ex:Class .

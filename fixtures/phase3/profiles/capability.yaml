@@ -1,0 +1,27 @@
+format_version: "1.1"
+xsd:
+  path: resources/xsd/ontome-import-2026-09-15.xsd
+  version: "2026-09-15"
+  sha256: d7d41c320feddace63f67fe664cb7f869b30230915cd3faee5bc92aacf7ab1a9
+constructs:
+  owl_class: supported
+  object_property: supported
+  datatype_property: supported
+  label: supported
+  comment: supported
+  scope_note: supported
+  subclass_of: supported
+  inverse_of: supported
+  named_domain: supported
+  anonymous_class: blocked
+  union: blocked
+  property_chain: blocked
+  annotation_property: blocked
+  named_individual: blocked
+  punning: blocked
+  missing_domain: blocked
+  missing_range: blocked
+  missing_label_language: blocked
+  unknown_predicate: blocked
+  unknown_rdf_type: blocked
+unknown_construct_policy: blocked

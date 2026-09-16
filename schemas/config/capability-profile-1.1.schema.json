@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lod4hss.org/ontome-importer/schemas/capability-profile-1.1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format_version", "xsd", "constructs", "unknown_construct_policy"],
+  "properties": {
+    "format_version": {"const": "1.1"},
+    "xsd": {"type": "object", "additionalProperties": true, "required": ["path", "version", "sha256"], "properties": {"path": {"type": "string"}, "version": {"type": "string"}, "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}},
+    "constructs": {"type": "object", "additionalProperties": false, "properties": {"rdf_class": {"$ref": "#/$defs/capability"}, "rdfs_class": {"$ref": "#/$defs/capability"}, "owl_class": {"$ref": "#/$defs/capability"}, "rdf_property": {"$ref": "#/$defs/capability"}, "object_property": {"$ref": "#/$defs/capability"}, "datatype_property": {"$ref": "#/$defs/capability"}, "annotation_property": {"$ref": "#/$defs/capability"}, "label": {"$ref": "#/$defs/capability"}, "comment": {"$ref": "#/$defs/capability"}, "scope_note": {"$ref": "#/$defs/capability"}, "example": {"$ref": "#/$defs/capability"}, "definition_link": {"$ref": "#/$defs/capability"}, "subclass_of": {"$ref": "#/$defs/capability"}, "subproperty_of": {"$ref": "#/$defs/capability"}, "equivalent_class": {"$ref": "#/$defs/capability"}, "equivalent_property": {"$ref": "#/$defs/capability"}, "inverse_of": {"$ref": "#/$defs/capability"}, "named_domain": {"$ref": "#/$defs/capability"}, "named_range": {"$ref": "#/$defs/capability"}, "anonymous_class": {"$ref": "#/$defs/capability"}, "union": {"$ref": "#/$defs/capability"}, "intersection": {"$ref": "#/$defs/capability"}, "property_chain": {"$ref": "#/$defs/capability"}, "restriction": {"$ref": "#/$defs/capability"}, "cardinality": {"$ref": "#/$defs/capability"}, "disjointness": {"$ref": "#/$defs/capability"}, "property_characteristic": {"$ref": "#/$defs/capability"}, "named_individual": {"$ref": "#/$defs/capability"}, "punning": {"$ref": "#/$defs/capability"}, "unknown_datatype": {"$ref": "#/$defs/capability"}, "missing_domain": {"$ref": "#/$defs/capability"}, "missing_range": {"$ref": "#/$defs/capability"}, "missing_label_language": {"$ref": "#/$defs/capability"}, "unknown_namespace": {"$ref": "#/$defs/capability"}, "forbidden_namespace": {"$ref": "#/$defs/capability"}, "unknown_predicate": {"$ref": "#/$defs/capability"}, "unknown_rdf_type": {"$ref": "#/$defs/capability"}}},
+    "unknown_construct_policy": {"const": "blocked"}
+  },
+  "$defs": {"capability": {"enum": ["supported", "blocked"]}}
+}

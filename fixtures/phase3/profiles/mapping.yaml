@@ -1,0 +1,11 @@
+format_version: "1.1"
+scope:
+  resource_selectors:
+    - uri_prefix: https://example.org/source/
+rules:
+  - id: map-source
+    selector:
+      uri_prefix: https://example.org/source/
+    action: map
+    target:
+      representation: generic

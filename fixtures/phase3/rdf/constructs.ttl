@@ -1,0 +1,25 @@
+@prefix ex: <https://example.org/source/> .
+@prefix ext: <https://example.org/external/> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+ex:Class a owl:Class ;
+  rdfs:label "Class" ;
+  rdfs:comment "A synthetic class."@en ;
+  skos:scopeNote "Fixture only."@en ;
+  rdfs:subClassOf ex:Parent .
+
+ex:property a owl:ObjectProperty ;
+  rdfs:domain ex:Class ;
+  rdfs:range [ a owl:Class ; owl:unionOf (ex:Class ex:Parent) ] ;
+  owl:inverseOf ex:inverse ;
+  ex:unknownPredicate "unknown" .
+
+ex:dataProperty a owl:DatatypeProperty .
+ex:annotation a owl:AnnotationProperty .
+ex:Individual a owl:NamedIndividual, owl:Class .
+ex:chain owl:propertyChainAxiom (ex:property ex:inverse) .
+ex:Class ex:externalRelation ext:Term .
+ex:Class ex:typedValue "42"^^xsd:integer .

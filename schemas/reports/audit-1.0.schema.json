@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lod4hss.org/ontome-importer/schemas/audit-1.0.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format_version", "inventory", "strict_ok", "findings", "observations", "counts"],
+  "properties": {
+    "format_version": {"const": "1.0"},
+    "inventory": {"type": "object", "required": ["file", "format", "sha256"], "properties": {"file": {"type": "string"}, "format": {"type": "string"}, "sha256": {"type": "string"}}, "additionalProperties": false},
+    "strict_ok": {"type": "boolean"},
+    "findings": {"type": "array", "items": {"$ref": "#/$defs/finding"}},
+    "observations": {"type": "array", "items": {"$ref": "#/$defs/observation"}},
+    "counts": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}}
+  },
+  "$defs": {
+    "term": {"type": "object", "required": ["kind", "value"], "properties": {"kind": {"enum": ["uri", "blank_node"]}, "value": {"type": "string"}}, "additionalProperties": false},
+    "finding": {"type": "object", "additionalProperties": false, "required": ["id", "construct", "resource", "triple_ids", "example", "provenance", "capability", "status", "generation_impact"], "properties": {"id": {"type": "string"}, "construct": {"type": "string"}, "resource": {"$ref": "#/$defs/term"}, "scope_resource": {"$ref": "#/$defs/term"}, "triple_ids": {"type": "array", "items": {"type": "string"}}, "example": {"type": "string"}, "provenance": {"type": "object", "required": ["file"], "properties": {"file": {"type": "string"}}, "additionalProperties": false}, "capability": {"enum": ["supported", "blocked"]}, "mapping_rule": {"type": "string"}, "reason": {"type": "string"}, "decision_needed": {"type": "string"}, "status": {"enum": ["mapped", "configured", "excluded", "blocked", "invalid"]}, "generation_impact": {"enum": ["included", "excluded", "blocks_generation"]}}},
+    "observation": {"type": "object", "additionalProperties": false, "required": ["id", "construct", "resource", "triple_ids", "example", "provenance"], "properties": {"id": {"type": "string"}, "construct": {"type": "string"}, "resource": {"$ref": "#/$defs/term"}, "scope_resource": {"$ref": "#/$defs/term"}, "triple_ids": {"type": "array", "items": {"type": "string"}}, "example": {"type": "string"}, "provenance": {"type": "object", "required": ["file"], "properties": {"file": {"type": "string"}}, "additionalProperties": false}}}
+  }
+}

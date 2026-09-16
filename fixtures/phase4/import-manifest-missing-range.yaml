@@ -1,0 +1,14 @@
+format_version: "1.0"
+source:
+  file: rdf/missing-range.ttl
+  format: turtle
+target:
+  namespace_uri: https://example.org/target/
+  labels:
+    - lang: en
+      value: Example target namespace
+profiles:
+  capability: profiles/capability.yaml
+  namespace_registry: profiles/namespace-registry.yaml
+  mapping: profiles/mapping.yaml
+strict: true

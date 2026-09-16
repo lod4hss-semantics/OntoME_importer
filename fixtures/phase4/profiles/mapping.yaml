@@ -1,0 +1,85 @@
+format_version: "2.0"
+scope:
+  resource_selectors:
+    - uri_prefix: https://example.org/source/
+external_references:
+  - uri: https://example.org/external/ExternalClass
+    reference_namespace: 100
+    identifier: E1
+  - uri: https://example.org/external/InverseProperty
+    reference_namespace: 100
+    identifier: P1
+  - uri: https://example.org/external/ExternalDatatype
+    reference_namespace: 100
+    identifier: D1
+rules:
+  - id: map-class
+    selector:
+      rdf_type: http://www.w3.org/2002/07/owl#Class
+    action: map
+    target:
+      entity_kind: class
+      identifier_in_namespace:
+        source: uri_suffix
+        strip_prefix: https://example.org/source/
+      identifier_in_uri: source_uri
+      label_predicates:
+        - http://www.w3.org/2000/01/rdf-schema#label
+      relations:
+        - field: subClassOf
+          predicate: http://www.w3.org/2000/01/rdf-schema#subClassOf
+        - field: equivalentClass
+          predicate: http://www.w3.org/2002/07/owl#equivalentClass
+      text_fields:
+        - field: contextNote
+          predicates:
+            - http://www.w3.org/2000/01/rdf-schema#comment
+  - id: map-object-property
+    selector:
+      rdf_type: http://www.w3.org/2002/07/owl#ObjectProperty
+    action: map
+    target:
+      entity_kind: property
+      property_kind: object
+      identifier_in_namespace:
+        source: uri_suffix
+        strip_prefix: https://example.org/source/
+      identifier_in_uri: source_uri
+      label_predicates:
+        - http://www.w3.org/2000/01/rdf-schema#label
+      relations:
+        - field: inverseOf
+          predicate: http://www.w3.org/2002/07/owl#inverseOf
+      domain_range:
+        domain_predicate: http://www.w3.org/2000/01/rdf-schema#domain
+        range_predicate: http://www.w3.org/2000/01/rdf-schema#range
+  - id: map-datatype-property
+    selector:
+      rdf_type: http://www.w3.org/2002/07/owl#DatatypeProperty
+    action: map
+    target:
+      entity_kind: property
+      property_kind: datatype
+      identifier_in_namespace:
+        source: uri_suffix
+        strip_prefix: https://example.org/source/
+      label_predicates:
+        - http://www.w3.org/2000/01/rdf-schema#label
+      domain_range:
+        domain_predicate: http://www.w3.org/2000/01/rdf-schema#domain
+        range_predicate: http://www.w3.org/2000/01/rdf-schema#range
+  - id: map-rdf-property
+    selector:
+      rdf_type: http://www.w3.org/1999/02/22-rdf-syntax-ns#Property
+    action: map
+    target:
+      entity_kind: property
+      property_kind: rdf
+      identifier_in_namespace:
+        source: uri_suffix
+        strip_prefix: https://example.org/source/
+      label_predicates:
+        - http://www.w3.org/2000/01/rdf-schema#label
+      domain_range:
+        domain_predicate: http://www.w3.org/2000/01/rdf-schema#domain
+        range_predicate: http://www.w3.org/2000/01/rdf-schema#range

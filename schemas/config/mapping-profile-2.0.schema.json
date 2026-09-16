@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lod4hss.org/ontome-importer/schemas/mapping-profile-2.0.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format_version", "scope", "rules", "external_references"],
+  "properties": {
+    "format_version": {"const": "2.0"},
+    "scope": {"type": "object", "additionalProperties": false, "required": ["resource_selectors"], "properties": {"resource_selectors": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/selector"}}}},
+    "rules": {"type": "array", "items": {"$ref": "#/$defs/rule"}},
+    "external_references": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["uri", "reference_namespace", "identifier"], "properties": {"uri": {"type": "string", "format": "uri"}, "reference_namespace": {"type": "integer", "minimum": 1}, "identifier": {"type": "string", "pattern": "^\\S+$"}}}}
+  },
+  "$defs": {
+    "uri_list": {"type": "array", "minItems": 1, "items": {"type": "string", "format": "uri"}, "uniqueItems": true},
+    "selector": {"type": "object", "additionalProperties": false, "minProperties": 1, "properties": {"uri": {"type": "string", "format": "uri"}, "uri_prefix": {"type": "string", "format": "uri"}, "rdf_type": {"type": "string", "format": "uri"}}},
+    "text_field": {"type": "object", "additionalProperties": false, "required": ["field", "predicates"], "properties": {"field": {"enum": ["scopeNote", "example", "contextNote", "bibliographicalNote"]}, "predicates": {"$ref": "#/$defs/uri_list"}}},
+    "relation": {"type": "object", "additionalProperties": false, "required": ["field", "predicate"], "properties": {"field": {"enum": ["subClassOf", "equivalentClass", "subPropertyOf", "equivalentProperty", "inverseOf"]}, "predicate": {"type": "string", "format": "uri"}}},
+    "target": {"type": "object", "additionalProperties": false, "required": ["entity_kind", "identifier_in_namespace", "label_predicates"], "properties": {"entity_kind": {"enum": ["class", "property"]}, "property_kind": {"enum": ["object", "datatype", "rdf"]}, "identifier_in_namespace": {"type": "object", "additionalProperties": false, "required": ["source", "strip_prefix"], "properties": {"source": {"const": "uri_suffix"}, "strip_prefix": {"type": "string", "format": "uri"}}}, "identifier_in_uri": {"const": "source_uri"}, "label_predicates": {"$ref": "#/$defs/uri_list"}, "text_fields": {"type": "array", "items": {"$ref": "#/$defs/text_field"}}, "relations": {"type": "array", "items": {"$ref": "#/$defs/relation"}}, "domain_range": {"type": "object", "additionalProperties": false, "required": ["domain_predicate", "range_predicate"], "properties": {"domain_predicate": {"type": "string", "format": "uri"}, "range_predicate": {"type": "string", "format": "uri"}}}}, "allOf": [{"if": {"properties": {"entity_kind": {"const": "property"}}}, "then": {"required": ["property_kind", "domain_range"]}}, {"if": {"properties": {"entity_kind": {"const": "class"}}}, "then": {"not": {"anyOf": [{"required": ["property_kind"]}, {"required": ["domain_range"]}]}}}]},
+    "rule": {"type": "object", "additionalProperties": false, "required": ["id", "selector", "action"], "properties": {"id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"}, "selector": {"$ref": "#/$defs/selector"}, "action": {"enum": ["map", "configure", "exclude"]}, "target": {"$ref": "#/$defs/target"}, "reason": {"type": "string", "minLength": 1}, "decision_needed": {"type": "string", "minLength": 1}}, "allOf": [{"if": {"properties": {"action": {"const": "map"}}}, "then": {"required": ["target"]}}, {"if": {"properties": {"action": {"const": "configure"}}}, "then": {"required": ["decision_needed"]}}, {"if": {"properties": {"action": {"const": "exclude"}}}, "then": {"required": ["reason"]}}]}
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lod4hss.org/ontome-importer/schemas/generation-audit-1.0.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format_version", "source", "xsd", "strict_ok", "findings", "counts"],
+  "properties": {
+    "format_version": {"const": "1.0"},
+    "source": {"type": "object", "required": ["file", "sha256"], "properties": {"file": {"type": "string"}, "sha256": {"type": "string"}}, "additionalProperties": false},
+    "xsd": {"type": "object", "required": ["version", "sha256"], "properties": {"version": {"type": "string"}, "sha256": {"type": "string"}}, "additionalProperties": false},
+    "strict_ok": {"type": "boolean"},
+    "findings": {"type": "array", "items": {"type": "object"}},
+    "counts": {"type": "object", "additionalProperties": {"type": "integer"}}
+  }
+}

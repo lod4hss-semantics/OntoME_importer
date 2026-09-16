@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lod4hss.org/ontome-importer/schemas/generation-trace-1.1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format_version", "source_sha256", "xsd", "xml_sha256", "entries"],
+  "properties": {
+    "format_version": {"const": "1.1"},
+    "source_sha256": {"type": "string"},
+    "xsd": {"type": "object", "required": ["version", "sha256"], "properties": {"version": {"type": "string"}, "sha256": {"type": "string"}}, "additionalProperties": false},
+    "xml_sha256": {"type": "string"},
+    "entries": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["id", "xml_path", "element", "value", "attributes", "mapping_rule", "origin", "source_triples"], "properties": {"id": {"type": "string"}, "xml_path": {"type": "string"}, "element": {"type": "string"}, "value": {"type": "string"}, "attributes": {"type": "object", "additionalProperties": {"type": "string"}}, "source_resource": {"type": "object"}, "source_triples": {"type": "array", "items": {"type": "string"}}, "mapping_rule": {"type": "string"}, "origin": {"enum": ["rdf", "configuration", "external_reference"]}}}}
+  }
+}

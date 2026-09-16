@@ -1,0 +1,6 @@
+format_version: "1.0"
+namespaces:
+  - uri: https://example.org/external/
+    ontome_namespace_id: 100
+    status: active
+    source: phase4 fixture

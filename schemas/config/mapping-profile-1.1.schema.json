@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lod4hss.org/ontome-importer/schemas/mapping-profile-1.1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format_version", "scope", "rules"],
+  "properties": {
+    "format_version": {"const": "1.1"},
+    "scope": {"type": "object", "additionalProperties": false, "required": ["resource_selectors"], "properties": {"resource_selectors": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/selector"}}}},
+    "rules": {"type": "array", "items": {"$ref": "#/$defs/rule"}}
+  },
+  "$defs": {
+    "selector": {"type": "object", "additionalProperties": false, "minProperties": 1, "properties": {"uri": {"type": "string", "format": "uri"}, "uri_prefix": {"type": "string", "format": "uri"}, "rdf_type": {"type": "string", "format": "uri"}}},
+    "rule": {"type": "object", "additionalProperties": false, "required": ["id", "selector", "action"], "properties": {"id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"}, "selector": {"$ref": "#/$defs/selector"}, "action": {"enum": ["map", "configure", "exclude"]}, "target": {"type": "object", "minProperties": 1}, "reason": {"type": "string", "minLength": 1}, "decision_needed": {"type": "string", "minLength": 1}}, "allOf": [{"if": {"properties": {"action": {"const": "map"}}}, "then": {"required": ["target"]}}, {"if": {"properties": {"action": {"const": "configure"}}}, "then": {"required": ["decision_needed"]}}, {"if": {"properties": {"action": {"const": "exclude"}}}, "then": {"required": ["reason"]}}]}
+  }
+}

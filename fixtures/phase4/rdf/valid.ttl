@@ -1,0 +1,30 @@
+@prefix ex: <https://example.org/source/> .
+@prefix ext: <https://example.org/external/> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+
+ex:Parent a owl:Class ;
+  rdfs:label "Parent"@en .
+
+ex:Class a owl:Class ;
+  rdfs:label "Class"@en ;
+  rdfs:comment "A mapped comment."@en ;
+  rdfs:subClassOf ex:Parent ;
+  owl:equivalentClass ext:ExternalClass .
+
+ex:property a owl:ObjectProperty ;
+  rdfs:label "property"@en ;
+  rdfs:domain ex:Class ;
+  rdfs:range ex:Parent ;
+  owl:inverseOf ext:InverseProperty .
+
+ex:dataProperty a owl:DatatypeProperty ;
+  rdfs:label "data property"@en ;
+  rdfs:domain ex:Class ;
+  rdfs:range ext:ExternalDatatype .
+
+ex:rdfProperty a rdf:Property ;
+  rdfs:label "RDF property"@en ;
+  rdfs:domain ex:Class ;
+  rdfs:range ex:Parent .

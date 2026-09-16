@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lod4hss.org/ontome-importer/schemas/validation-1.1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format_version", "valid", "source", "xsd", "artifacts", "checks", "duplicate_identifiers", "unresolved_references", "count_differences", "xml_elements_without_trace", "resolved_resources_absent_from_xml", "counts"],
+  "properties": {
+    "format_version": {"const": "1.1"},
+    "valid": {"type": "boolean"},
+    "source": {"type": "object", "required": ["file", "sha256"], "properties": {"file": {"type": "string"}, "sha256": {"type": "string"}}, "additionalProperties": false},
+    "xsd": {"type": "object", "required": ["version", "sha256"], "properties": {"version": {"type": "string"}, "sha256": {"type": "string"}}, "additionalProperties": false},
+    "artifacts": {"type": "object", "required": ["xml_sha256", "trace", "audit"], "properties": {"xml_sha256": {"type": "string"}, "trace": {"type": "string"}, "audit": {"type": "string"}}, "additionalProperties": false},
+    "checks": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["name", "valid"], "properties": {"name": {"type": "string"}, "valid": {"type": "boolean"}, "message": {"type": "string"}, "location": {"type": "string"}}}},
+    "duplicate_identifiers": {"type": "array", "items": {"type": "string"}},
+    "unresolved_references": {"type": "array", "items": {"type": "string"}},
+    "count_differences": {"type": "array", "items": {"type": "string"}},
+    "xml_elements_without_trace": {"type": "array", "items": {"type": "string"}},
+    "resolved_resources_absent_from_xml": {"type": "array", "items": {"type": "string"}},
+    "counts": {"type": "object", "required": ["passed", "failed"], "properties": {"passed": {"type": "integer", "minimum": 0}, "failed": {"type": "integer", "minimum": 0}}, "additionalProperties": false}
+  }
+}
