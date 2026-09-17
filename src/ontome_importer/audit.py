@@ -34,7 +34,14 @@ class AuditReport:
         data = self.to_dict()
         lines = ["# RDF Audit", "", f"Strict result: {'pass' if data['strict_ok'] else 'blocked'}", "", "| Status | Count |", "| --- | ---: |"]
         lines.extend(f"| {status} | {count} |" for status, count in data["counts"].items())
-        lines.extend(["", "## Decisions", ""])
+        grouped = Counter((finding["status"], finding["construct"]) for finding in self.findings)
+        lines.extend(["", "## Decision Summary", "", "Findings are grouped below. A group may be covered by one explicit mapping rule; it does not imply one rule per finding.", "", "| Status | Construct | Count |", "| --- | --- | ---: |"])
+        lines.extend(f"| {status} | `{construct}` | {count} |" for (status, construct), count in sorted(grouped.items()))
+        external = _external_reference_groups(self.inventory, self.findings)
+        if external:
+            lines.extend(["", "## External References", "", "These URI prefixes occur outside the import scope. Registering a namespace classifies references; generation still requires an exact external reference for each URI used.", "", "| URI prefix | Assertions |", "| --- | ---: |"])
+            lines.extend(f"| `{prefix}` | {count} |" for prefix, count in external)
+        lines.extend(["", "## Detailed Decisions", ""])
         for finding in self.findings:
             if finding["status"] != "mapped":
                 lines.append(f"- `{finding['status']}` `{finding['construct']}` on `{finding['resource']['value']}`: {finding.get('decision_needed') or finding.get('reason') or 'decision required'}")
@@ -159,3 +166,14 @@ def _serialize_term(term: RdfTerm) -> str:
     if term.datatype:
         return f"{escaped}^^<{term.datatype}>"
     return escaped
+
+
+def _external_reference_groups(inventory: Inventory, findings: tuple[dict[str, object], ...]) -> list[tuple[str, int]]:
+    finding_ids = {triple_id for finding in findings for triple_id in finding["triple_ids"] if finding["construct"] in {"unknown_namespace", "forbidden_namespace"}}
+    counts: Counter[str] = Counter()
+    for triple in inventory.triples:
+        if triple.id not in finding_ids or triple.object.kind != "uri":
+            continue
+        prefix = triple.object.value.rsplit("#", 1)[0] + "#" if "#" in triple.object.value else triple.object.value.rsplit("/", 1)[0] + "/"
+        counts[prefix] += 1
+    return sorted(counts.items())

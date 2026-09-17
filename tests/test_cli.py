@@ -18,7 +18,9 @@ def test_help(capsys):
         main(["--help"])
     except SystemExit as error:
         assert error.code == 0
-    assert "audit" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "audit" in output
+    assert "init" in output
 
 
 def test_audit_writes_all_reports(tmp_path):

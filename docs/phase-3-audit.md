@@ -1,5 +1,7 @@
 # Phase 3 RDF Audit
 
+This is a technical reference. For the operational workflow, use the [User Guide](user-guide.md).
+
 `ontome-importer audit --manifest MANIFEST --output-dir DIRECTORY` loads an RDF source, validates its versioned profiles, and writes `inventory.json`, `audit.json`, and `audit.md`.
 
 The audit is generic. It detects RDF, RDFS, OWL and SKOS constructs, preserves unknown predicates and RDF types, and links each finding to stable inventory triples. Capability and mapping profiles determine whether a finding is mapped, configured, excluded, blocked, or invalid.

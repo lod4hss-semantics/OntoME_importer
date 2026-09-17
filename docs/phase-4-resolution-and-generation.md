@@ -1,5 +1,7 @@
 # Phase 4 Resolution And XML Generation
 
+This is a technical reference. For the operational workflow, use the [User Guide](user-guide.md).
+
 `ontome-importer generate --manifest MANIFEST --output-dir DIRECTORY` loads the complete version 1.0 manifest and capability contracts with a mapping profile 2.0. It verifies the source checksum and XSD checksum, reruns the RDF audit, resolves mappings, validates the XML against the pinned XSD, then writes `import.xml`, `generation-trace.json`, and `generation-audit.json`.
 
 Mapping profile 2.0 rules are typed as `class` or `property`; properties require `object`, `datatype`, or `rdf`. A local identifier can only be derived by the configured `uri_suffix` policy and its explicit `strip_prefix`. A generic mapping target is not a generation contract.

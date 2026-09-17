@@ -1,0 +1,47 @@
+format_version: "1.0"
+xsd:
+  path: resources/xsd/ontome-import-2026-09-15.xsd
+  version: "2026-09-15"
+  sha256: d7d41c320feddace63f67fe664cb7f869b30230915cd3faee5bc92aacf7ab1a9
+xml:
+  root: namespace
+  class_fields: [identifierInNamespace, identifierInURI, standardLabel, subClassOf, parentClassOf, equivalentClass, disjointWith, textProperties]
+  property_fields: [identifierInNamespace, identifierInURI, label, subPropertyOf, parentPropertyOf, equivalentProperty, inverseOf, hasDomain, hasRange, domainInstancesMinQuantifier, domainInstancesMaxQuantifier, rangeInstancesMinQuantifier, rangeInstancesMaxQuantifier, textProperties]
+constructs:
+  rdf_class: supported
+  rdfs_class: supported
+  owl_class: supported
+  rdf_property: supported
+  object_property: supported
+  datatype_property: supported
+  label: supported
+  comment: supported
+  scope_note: supported
+  example: supported
+  subclass_of: supported
+  subproperty_of: supported
+  equivalent_class: supported
+  equivalent_property: supported
+  inverse_of: supported
+  named_domain: supported
+  named_range: supported
+  anonymous_class: blocked
+  union: blocked
+  intersection: blocked
+  property_chain: blocked
+  restriction: blocked
+  cardinality: blocked
+  disjointness: blocked
+  property_characteristic: blocked
+  annotation_property: blocked
+  named_individual: blocked
+  punning: blocked
+  unknown_datatype: blocked
+  missing_domain: blocked
+  missing_range: blocked
+  missing_label_language: blocked
+  unknown_namespace: blocked
+  forbidden_namespace: blocked
+  unknown_predicate: blocked
+  unknown_rdf_type: blocked
+unknown_construct_policy: blocked
