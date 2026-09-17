@@ -36,6 +36,8 @@ def build_parser() -> argparse.ArgumentParser:
     audit = commands.add_parser("audit", help="Audit an RDF ontology against a mapping profile.")
     audit.add_argument("--manifest", required=True, help="Path to an import manifest 1.1.")
     audit.add_argument("--output-dir", required=True, help="Directory for audit outputs.")
+    audit.add_argument("--generation-manifest", help="Generation manifest used to prefill an optional mapping workbook.")
+    audit.add_argument("--workbook", help="New XLSX mapping workbook created with this audit.")
     generate = commands.add_parser("generate", help="Generate OntoME XML from resolved mappings.")
     generate.add_argument("--manifest", required=True, help="Path to an import manifest 1.0 with mapping profile 2.0.")
     generate.add_argument("--output-dir", required=True, help="Directory for generated XML and reports.")
@@ -110,6 +112,14 @@ def _run_audit(args: argparse.Namespace) -> int:
         verify_source_checksum(profiles.manifest, source_path)
         inventory = load_inventory(source_path, str(source["format"]))
         report = audit_inventory(inventory, profiles.capability, profiles.mapping, profiles.namespace_registry)
+        if bool(args.generation_manifest) != bool(args.workbook):
+            raise ProfileError("--generation-manifest and --workbook must be used together")
+        if args.workbook:
+            workbook = Path(args.workbook)
+            if workbook.exists():
+                raise OSError(f"Workbook already exists: {workbook}")
+            generation_profiles = load_generation_profiles(Path(args.generation_manifest))
+            export_workbook(workbook, generation_profiles, inventory)
         _publish_files(Path(args.output_dir), {
             "inventory.json": inventory.to_json().encode("utf-8"),
             "audit.json": report.to_json().encode("utf-8"),

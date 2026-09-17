@@ -217,7 +217,9 @@ cd ~/Documents/imports/mon-ontologie
 ```bash
 ontome-importer audit \
   --manifest config/audit.yaml \
-  --output-dir build/audit
+  --generation-manifest config/generation.yaml \
+  --output-dir build/audit \
+  --workbook decisions/mapping.xlsx
 ```
 
 Cette commande utilise exactement le manifest indiqué après `--manifest`. Elle produit :
@@ -225,36 +227,29 @@ Cette commande utilise exactement le manifest indiqué après `--manifest`. Elle
 - `build/audit/inventory.json` : tout ce qui a été lu dans le RDF ;
 - `build/audit/audit.json` : le rapport complet détaillé ;
 - `build/audit/audit.md` : le résumé à lire en priorité.
+- `decisions/mapping.xlsx` : le classeur à compléter avec l'équipe.
 
-L'audit peut se terminer avec le code `0` tout en signalant des blocages dans `audit.md`. C'est normal : il a terminé son analyse. Lire les décisions à prendre avant de passer à la génération.
+L'audit peut se terminer avec le code `0` tout en signalant des blocages. C'est normal : il a terminé son analyse. Travaillez ensuite dans le classeur, pas dans la liste détaillée du Markdown.
 
 ### 2. Compléter le mapping
 
-Vous pouvez préparer les décisions dans un classeur XLSX plutôt que modifier les YAML directement :
-
-```bash
-ontome-importer assist export \
-  --manifest config/generation.yaml \
-  --output decisions/mapping-assistant.xlsx
-```
-
-Le classeur distingue les règles qui importent vos ressources locales des références vers des namespaces OntoME existants. Après les décisions de l'équipe, contrôlez-le puis compilez les YAML utilisés par la génération :
+Le classeur distingue les classes, propriétés, références externes, métadonnées et règles. Après les décisions de l'équipe, contrôlez-le puis compilez les YAML utilisés par la génération :
 
 ```bash
 ontome-importer assist check \
   --manifest config/generation.yaml \
-  --workbook decisions/mapping-assistant.xlsx \
+  --workbook decisions/mapping.xlsx \
   --output build/assistant/check-report.json
 
 ontome-importer assist compile \
   --manifest config/generation.yaml \
-  --workbook decisions/mapping-assistant.xlsx \
+  --workbook decisions/mapping.xlsx \
   --mapping-output config/profiles/mapping-generation.yaml \
   --registry-output config/profiles/namespace-registry.yaml \
   --report-output build/assistant/compile-report.json
 ```
 
-`assist check` ne modifie jamais le classeur. `assist compile` refuse les décisions incomplètes et remplace les deux YAML indiqués uniquement après contrôle réussi.
+`assist check` met à jour les onglets de validation et les couleurs du même classeur, sans modifier les décisions saisies. `assist compile` refuse les décisions incomplètes et remplace les deux YAML indiqués uniquement après contrôle réussi.
 
 Un catalogue RDF externe est facultatif. Lorsqu'il porte un identifiant canonique unique pour chaque URI, l'assistant peut préremplir les références exactes ; vous indiquez explicitement le prédicat qui porte cet identifiant et le namespace OntoME correspondant :
 
@@ -268,7 +263,7 @@ ontome-importer assist export \
   --output decisions/mapping-assistant.xlsx
 ```
 
-Sans catalogue, le classeur liste les références externes détectées et les décisions restent à compléter dans `EXTERNAL_NAMESPACES` et `EXTERNAL_TERMS`.
+Sans catalogue, le classeur liste les références externes détectées et les décisions restent à compléter dans `EXTERNAL_REFERENCES`.
 
 Pour chaque blocage en portée, décider de l'une des actions suivantes :
 

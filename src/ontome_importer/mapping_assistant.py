@@ -8,6 +8,7 @@ from pathlib import Path
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font
+from openpyxl.styles import PatternFill
 from openpyxl.worksheet.datavalidation import DataValidation
 import yaml
 
@@ -24,6 +25,14 @@ RULE_COLUMNS = (
 )
 NAMESPACE_COLUMNS = ("uri", "ontome_namespace_id", "status", "source", "verified_at")
 TERM_COLUMNS = ("uri", "reference_namespace", "identifier")
+RESOURCE_COLUMNS = ("uri", "rdf_types", "labels", "relations", "rule_id", "status", "notes", "finding_ids")
+EXTERNAL_REFERENCE_COLUMNS = ("uri", "uri_prefix", "used_by", "predicates", "ontome_namespace_id", "identifier", "origin", "status", "finding_ids")
+METADATA_COLUMNS = ("resource_uri", "construct", "example", "action", "reason", "status", "finding_id")
+RED = PatternFill("solid", fgColor="FECACA")
+ORANGE = PatternFill("solid", fgColor="FED7AA")
+GREEN = PatternFill("solid", fgColor="BBF7D0")
+GREY = PatternFill("solid", fgColor="E5E7EB")
+BLUE = PatternFill("solid", fgColor="BFDBFE")
 
 
 class AssistantError(ValueError):
@@ -42,25 +51,33 @@ def export_workbook(
     report = audit_inventory(inventory, profiles.capability, profiles.mapping, profiles.namespace_registry)
     workbook = Workbook()
     readme = workbook.active
-    readme.title = "README"
+    readme.title = "SUMMARY"
     _append_rows(readme, [
-        ("Mapping assistant workbook", ""),
+        ("Mapping assistant", ""),
         ("Version", WORKBOOK_VERSION),
         ("Source SHA-256", inventory.source_sha256),
         ("Source format", inventory.source_format),
         ("Catalog", catalog.source_file if catalog else "Not supplied"),
-        ("Instructions", "Complete RULES and external reference sheets, then run assist check and assist compile."),
+        ("Instructions", "Complete mapping rules and external references, then run assist check. Red rows block compilation."),
         ("Authority", "The workbook records explicit decisions. It does not infer mappings."),
+    ])
+    project = workbook.create_sheet("PROJECT")
+    _append_rows(project, [
+        ("target_namespace_uri", profiles.manifest["target"]["namespace_uri"]),
+        ("publication_intent", "new_namespace"),
+        ("note", "Existing published namespace updates require an official OntoME import contract."),
     ])
     rules = workbook.create_sheet("RULES")
     rules.append(RULE_COLUMNS)
     for rule in profiles.mapping["rules"]:
         rules.append(_rule_to_row(rule))
-    namespaces = workbook.create_sheet("EXTERNAL_NAMESPACES")
+    namespaces = workbook.create_sheet("_external_namespaces")
+    namespaces.sheet_state = "hidden"
     namespaces.append(NAMESPACE_COLUMNS)
     for item in profiles.namespace_registry["namespaces"]:
         namespaces.append(tuple(item.get(column, "") for column in NAMESPACE_COLUMNS))
-    terms = workbook.create_sheet("EXTERNAL_TERMS")
+    terms = workbook.create_sheet("_external_terms")
+    terms.sheet_state = "hidden"
     terms.append(TERM_COLUMNS)
     existing_references = {item["uri"]: item for item in profiles.mapping["external_references"]}
     detected_external_uris = _external_uris(inventory, profiles.mapping)
@@ -76,20 +93,49 @@ def export_workbook(
         for prefix in sorted({_uri_prefix(uri) for uri in catalog_identifiers if uri in detected_external_uris}):
             if prefix not in registered:
                 namespaces.append((prefix, catalog_namespace_id, "active", f"catalog:{catalog.source_file}", ""))
-    resources = workbook.create_sheet("RESOURCES")
-    resources.append(("uri", "rdf_types", "labels", "finding_count"))
-    findings_by_resource: dict[str, int] = {}
+    classes = workbook.create_sheet("CLASSES")
+    properties = workbook.create_sheet("PROPERTIES")
+    for sheet in (classes, properties):
+        sheet.append(RESOURCE_COLUMNS)
+    findings_by_resource: dict[str, list[dict[str, object]]] = {}
     for finding in report.findings:
         value = str(finding["resource"]["value"])
-        findings_by_resource[value] = findings_by_resource.get(value, 0) + 1
+        findings_by_resource.setdefault(value, []).append(finding)
     triples_by_subject: dict[object, list[object]] = {}
     for triple in inventory.triples:
         triples_by_subject.setdefault(triple.subject, []).append(triple)
     for resource in inventory.resources:
         if resource.id.kind != "uri" or not _in_scope(resource.id.value, profiles.mapping):
             continue
-        labels = [triple.object.value for triple in triples_by_subject[resource.id] if triple.object.kind == "literal"]
-        resources.append((resource.id.value, " | ".join(term.value for term in resource.types), " | ".join(labels), findings_by_resource.get(resource.id.value, 0)))
+        outgoing = triples_by_subject.get(resource.id, [])
+        labels = [triple.object.value for triple in outgoing if triple.object.kind == "literal"]
+        relations = [f"{triple.predicate.value} -> {triple.object.value}" for triple in outgoing if triple.object.kind == "uri"]
+        findings = findings_by_resource.get(resource.id.value, [])
+        row = (resource.id.value, " | ".join(term.value for term in resource.types), " | ".join(labels), "\n".join(relations), "", "blocked" if findings else "unreviewed", "", " | ".join(str(item["id"]) for item in findings))
+        types = {term.value for term in resource.types}
+        if "http://www.w3.org/2002/07/owl#Class" in types or "http://www.w3.org/2000/01/rdf-schema#Class" in types:
+            classes.append(row)
+        elif types & {"http://www.w3.org/2002/07/owl#ObjectProperty", "http://www.w3.org/2002/07/owl#DatatypeProperty", "http://www.w3.org/1999/02/22-rdf-syntax-ns#Property"}:
+            properties.append(row)
+    external = workbook.create_sheet("EXTERNAL_REFERENCES")
+    external.append(EXTERNAL_REFERENCE_COLUMNS)
+    uses = _external_uses(inventory, profiles.mapping)
+    for uri in ordered_external_uris:
+        usage = uses[uri]
+        reference = existing_references.get(uri, {})
+        identifier = reference.get("identifier", catalog_identifiers.get(uri, ""))
+        namespace_id = reference.get("reference_namespace", catalog_namespace_id if identifier else "")
+        external.append((uri, _uri_prefix(uri), " | ".join(sorted(usage["subjects"])), " | ".join(sorted(usage["predicates"])), namespace_id, identifier, "catalog" if uri in catalog_identifiers else "manual", "green" if identifier else "blocked", " | ".join(usage["finding_ids"])))
+    metadata = workbook.create_sheet("METADATA")
+    metadata.append(METADATA_COLUMNS)
+    for finding in report.findings:
+        if finding["construct"] in {"unknown_predicate", "unknown_rdf_type", "annotation_property", "restriction", "union", "intersection", "property_chain", "cardinality"}:
+            metadata.append((finding["resource"]["value"], finding["construct"], finding["example"], "", "", finding["status"], finding["id"]))
+    blockers = workbook.create_sheet("BLOCKERS")
+    blockers.append(("status", "construct", "resource", "message", "finding_id", "triple_ids"))
+    for finding in report.findings:
+        if finding["status"] != "mapped":
+            blockers.append((finding["status"], finding["construct"], finding["resource"]["value"], finding.get("decision_needed") or finding.get("reason") or "decision required", finding["id"], " | ".join(finding["triple_ids"])))
     validation = workbook.create_sheet("VALIDATION")
     validation.append(("severity", "sheet", "row", "message"))
     metadata = workbook.create_sheet("_metadata")
@@ -109,11 +155,16 @@ def check_workbook(path: Path, profiles: GenerationProfiles, inventory: Inventor
     workbook = _load_workbook(path)
     issues: list[dict[str, object]] = []
     _check_metadata(workbook, profiles, inventory, issues)
-    for sheet, columns in (("RULES", RULE_COLUMNS), ("EXTERNAL_NAMESPACES", NAMESPACE_COLUMNS), ("EXTERNAL_TERMS", TERM_COLUMNS)):
+    if "EXTERNAL_REFERENCES" in workbook.sheetnames:
+        _sync_external_reference_rows(workbook)
+    for sheet, columns in (("RULES", RULE_COLUMNS), ("_external_namespaces", NAMESPACE_COLUMNS), ("_external_terms", TERM_COLUMNS)):
         _check_headers(workbook, sheet, columns, issues)
     if not issues:
         _validate_rows(workbook, issues)
-    return {"format_version": "1.0", "workbook": str(path), "valid": not any(issue["severity"] == "error" for issue in issues), "issues": issues}
+    report = {"format_version": "1.0", "workbook": str(path), "valid": not any(issue["severity"] == "error" for issue in issues), "issues": issues}
+    _annotate_workbook(workbook, report)
+    workbook.save(path)
+    return report
 
 
 def compile_workbook(path: Path, profiles: GenerationProfiles, inventory: Inventory) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
@@ -122,8 +173,8 @@ def compile_workbook(path: Path, profiles: GenerationProfiles, inventory: Invent
         raise AssistantError("Workbook has blocking validation errors")
     workbook = _load_workbook(path)
     rules = [_rule_from_row(row) for row in _sheet_rows(workbook["RULES"], RULE_COLUMNS) if row["id"]]
-    namespaces = [_namespace_from_row(row) for row in _sheet_rows(workbook["EXTERNAL_NAMESPACES"], NAMESPACE_COLUMNS) if row["uri"]]
-    references = [_reference_from_row(row) for row in _sheet_rows(workbook["EXTERNAL_TERMS"], TERM_COLUMNS) if row["uri"]]
+    namespaces = [_namespace_from_row(row) for row in _sheet_rows(workbook["_external_namespaces"], NAMESPACE_COLUMNS) if row["uri"]]
+    references = [_reference_from_row(row) for row in _sheet_rows(workbook["_external_terms"], TERM_COLUMNS) if row["uri"]]
     mapping = {"format_version": "2.0", "scope": profiles.mapping["scope"], "rules": rules, "external_references": references}
     registry = {"format_version": "1.0", "namespaces": namespaces}
     report["provenance"] = {
@@ -170,6 +221,7 @@ def _check_headers(workbook: object, name: str, expected: tuple[str, ...], issue
 
 def _validate_rows(workbook: object, issues: list[dict[str, object]]) -> None:
     identifiers: set[str] = set()
+    mapping_rules: list[dict[str, object]] = []
     for row_number, row in enumerate(_sheet_rows(workbook["RULES"], RULE_COLUMNS), start=2):
         if not row["id"]:
             continue
@@ -180,6 +232,7 @@ def _validate_rows(workbook: object, issues: list[dict[str, object]]) -> None:
         if selector_count == 0:
             issues.append(_issue("error", "RULES", row_number, "A rule requires at least one selector."))
         if row["action"] == "map":
+            mapping_rules.append(row)
             required = ("entity_kind", "identifier_strip_prefix", "label_predicates")
             if any(not row[column] for column in required):
                 issues.append(_issue("error", "RULES", row_number, "A mapping rule requires entity kind, identifier prefix and label predicates."))
@@ -189,9 +242,18 @@ def _validate_rows(workbook: object, issues: list[dict[str, object]]) -> None:
             issues.append(_issue("error", "RULES", row_number, "An exclusion requires a reason."))
         elif row["action"] == "configure" and not row["decision_needed"]:
             issues.append(_issue("error", "RULES", row_number, "A configured rule requires a decision description."))
-    namespace_ids = {int(row["ontome_namespace_id"]) for row in _sheet_rows(workbook["EXTERNAL_NAMESPACES"], NAMESPACE_COLUMNS) if row["uri"] and str(row["ontome_namespace_id"]).isdigit()}
+    for sheet_name in ("CLASSES", "PROPERTIES"):
+        for row_number, row in enumerate(_sheet_rows(workbook[sheet_name], RESOURCE_COLUMNS), start=2):
+            if not row["uri"]:
+                continue
+            matches = [rule for rule in mapping_rules if _matches_resource_row(rule, row)]
+            if len(matches) == 0:
+                issues.append(_issue("error", sheet_name, row_number, "No mapping rule covers this resource."))
+            elif len(matches) > 1:
+                issues.append(_issue("error", sheet_name, row_number, "More than one mapping rule covers this resource."))
+    namespace_ids = {int(row["ontome_namespace_id"]) for row in _sheet_rows(workbook["_external_namespaces"], NAMESPACE_COLUMNS) if row["uri"] and str(row["ontome_namespace_id"]).isdigit()}
     references: set[str] = set()
-    for row_number, row in enumerate(_sheet_rows(workbook["EXTERNAL_TERMS"], TERM_COLUMNS), start=2):
+    for row_number, row in enumerate(_sheet_rows(workbook["_external_terms"], TERM_COLUMNS), start=2):
         if not row["uri"]:
             continue
         if row["uri"] in references:
@@ -221,6 +283,16 @@ def _rule_from_row(row: dict[str, object]) -> dict[str, object]:
             target["domain_range"] = {"domain_predicate": row["domain_predicate"], "range_predicate": row["range_predicate"]}
         result["target"] = target
     return result
+
+
+def _matches_resource_row(rule: dict[str, object], resource: dict[str, object]) -> bool:
+    if rule["selector_uri"] and rule["selector_uri"] != resource["uri"]:
+        return False
+    if rule["selector_uri_prefix"] and not str(resource["uri"]).startswith(str(rule["selector_uri_prefix"])):
+        return False
+    if rule["selector_rdf_type"] and str(rule["selector_rdf_type"]) not in str(resource["rdf_types"]).split(" | "):
+        return False
+    return True
 
 
 def _rule_to_row(rule: dict[str, object]) -> tuple[object, ...]:
@@ -257,6 +329,38 @@ def _sheet_rows(sheet: object, columns: tuple[str, ...]):
 def _external_uris(inventory: Inventory, mapping: dict[str, object]) -> list[str]:
     standard = ("http://www.w3.org/", "https://www.w3.org/")
     return sorted({triple.object.value for triple in inventory.triples if triple.object.kind == "uri" and not _in_scope(triple.object.value, mapping) and not triple.object.value.startswith(standard)})
+
+
+def _external_uses(inventory: Inventory, mapping: dict[str, object]) -> dict[str, dict[str, set[str] | list[str]]]:
+    uses: dict[str, dict[str, set[str] | list[str]]] = {}
+    for triple in inventory.triples:
+        if triple.object.kind != "uri" or triple.object.value not in _external_uris(inventory, mapping):
+            continue
+        item = uses.setdefault(triple.object.value, {"subjects": set(), "predicates": set(), "finding_ids": []})
+        item["subjects"].add(triple.subject.value)
+        item["predicates"].add(triple.predicate.value)
+    return uses
+
+
+def _sync_external_reference_rows(workbook: object) -> None:
+    terms = workbook["_external_terms"]
+    namespaces = workbook["_external_namespaces"]
+    existing_sources = {
+        (str(row["uri"]), row["ontome_namespace_id"]): row["source"]
+        for row in _sheet_rows(namespaces, NAMESPACE_COLUMNS) if row["uri"]
+    }
+    terms.delete_rows(2, max(0, terms.max_row - 1))
+    namespaces.delete_rows(2, max(0, namespaces.max_row - 1))
+    namespace_rows: dict[tuple[str, object], tuple[object, ...]] = {}
+    for row in _sheet_rows(workbook["EXTERNAL_REFERENCES"], EXTERNAL_REFERENCE_COLUMNS):
+        if not row["uri"]:
+            continue
+        terms.append((row["uri"], row["ontome_namespace_id"], row["identifier"]))
+        if row["ontome_namespace_id"]:
+            key = (str(row["uri_prefix"]), row["ontome_namespace_id"])
+            namespace_rows[key] = (row["uri_prefix"], row["ontome_namespace_id"], "active", existing_sources.get(key, "workbook"), "")
+    for row in namespace_rows.values():
+        namespaces.append(row)
 
 
 def _catalog_identifiers(catalog: Inventory | None, predicate: str | None) -> dict[str, str]:
@@ -313,3 +417,24 @@ def _add_validations(rules: object, namespaces: object) -> None:
 
 def _issue(severity: str, sheet: str, row: int, message: str) -> dict[str, object]:
     return {"severity": severity, "sheet": sheet, "row": row, "message": message}
+
+
+def _annotate_workbook(workbook: object, report: dict[str, object]) -> None:
+    validation = workbook["VALIDATION"]
+    if validation.max_row > 1:
+        validation.delete_rows(2, validation.max_row - 1)
+    for issue in report["issues"]:
+        validation.append((issue["severity"], issue["sheet"], issue["row"], issue["message"]))
+    for sheet_name in ("CLASSES", "PROPERTIES", "EXTERNAL_REFERENCES", "METADATA", "BLOCKERS"):
+        sheet = workbook[sheet_name]
+        for row in range(2, sheet.max_row + 1):
+            status_column = 1 if sheet_name == "BLOCKERS" else 8 if sheet_name == "EXTERNAL_REFERENCES" else 6
+            status = str(sheet.cell(row, status_column).value or "").lower()
+            fill = RED if status in {"blocked", "invalid", "error"} else ORANGE if status in {"configured", "unreviewed"} else GREEN if status in {"mapped", "green", "resolved"} else GREY if status == "excluded" else None
+            if fill:
+                for cell in sheet[row]:
+                    cell.fill = fill
+    for row in range(2, validation.max_row + 1):
+        if validation.cell(row, 1).value == "error":
+            for cell in validation[row]:
+                cell.fill = RED

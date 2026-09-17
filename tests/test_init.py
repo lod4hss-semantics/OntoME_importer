@@ -1,6 +1,7 @@
 import hashlib
 from pathlib import Path
 
+from openpyxl import load_workbook
 from ontome_importer.cli import main
 from ontome_importer.profiles import load_audit_profiles, load_generation_profiles, verify_capability_xsd
 
@@ -52,3 +53,17 @@ def test_init_requires_an_explicit_format_when_extension_is_unknown(tmp_path, ca
     assert main(["init", "--source", str(source), "--workspace", str(workspace), "--scope-uri-prefix", "https://example.org/"]) == 2
     assert "Cannot infer RDF format" in capsys.readouterr().err
     assert not workspace.exists()
+
+
+def test_audit_creates_a_mapping_workbook_for_a_workspace(tmp_path):
+    workspace = tmp_path / "my-import"
+    assert main([
+        "init", "--source", str(SOURCE), "--workspace", str(workspace), "--scope-uri-prefix", "https://example.org/",
+    ]) == 0
+    workbook = workspace / "decisions/mapping.xlsx"
+    assert main([
+        "audit", "--manifest", str(workspace / "config/audit.yaml"), "--generation-manifest", str(workspace / "config/generation.yaml"),
+        "--output-dir", str(workspace / "build/audit"), "--workbook", str(workbook),
+    ]) == 0
+    document = load_workbook(workbook, read_only=True)
+    assert {"SUMMARY", "CLASSES", "PROPERTIES", "EXTERNAL_REFERENCES", "METADATA", "BLOCKERS", "VALIDATION"} <= set(document.sheetnames)

@@ -72,7 +72,7 @@ def initialize_workspace(
     except Exception:
         shutil.rmtree(staging, ignore_errors=True)
         raise
-    return f"ontome-importer audit --manifest {workspace / 'config/audit.yaml'} --output-dir {workspace / 'build/audit'}"
+    return f"ontome-importer audit --manifest {workspace / 'config/audit.yaml'} --generation-manifest {workspace / 'config/generation.yaml'} --output-dir {workspace / 'build/audit'} --workbook {workspace / 'decisions/mapping.xlsx'}"
 
 
 def _resolve_format(source: Path, source_format: str | None) -> str:
@@ -161,10 +161,10 @@ Votre source RDF copiée est `source/{source_name}`.
 ## Prochaine étape : audit
 
 ```bash
-ontome-importer audit --manifest config/audit.yaml --output-dir build/audit
+ontome-importer audit --manifest config/audit.yaml --generation-manifest config/generation.yaml --output-dir build/audit --workbook decisions/mapping.xlsx
 ```
 
-Lisez `build/audit/audit.md` avec l'équipe d'import. Le premier audit signale normalement des blocages : aucune décision de mapping n'a encore été prise.
+Travaillez dans `decisions/mapping.xlsx` avec l'équipe d'import. Le premier audit signale normalement des blocages : aucune décision de mapping n'a encore été prise.
 
 Après les décisions de l'équipe sur les éléments à importer, complétez `config/profiles/mapping-generation.yaml` et remplacez les valeurs `TODO` dans `config/generation.yaml`.
 
