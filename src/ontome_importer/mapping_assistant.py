@@ -11,13 +11,15 @@ from openpyxl.styles import Font
 from openpyxl.styles import PatternFill
 from openpyxl.worksheet.datavalidation import DataValidation
 import yaml
+from jsonschema import Draft202012Validator, FormatChecker
 
 from ontome_importer.audit import audit_inventory
 from ontome_importer.inventory import Inventory
-from ontome_importer.profiles import GenerationProfiles, ProfileError
+from ontome_importer.package_resources import package_resource_path
+from ontome_importer.profiles import GenerationProfiles, ProfileError, validate_generation_mapping
 
 
-WORKBOOK_VERSION = "1.0"
+WORKBOOK_VERSION = "1.1"
 RULE_COLUMNS = (
     "id", "selector_uri", "selector_uri_prefix", "selector_rdf_type", "action", "entity_kind", "property_kind",
     "identifier_strip_prefix", "label_predicates", "identifier_in_uri", "relations_json", "text_fields_json",
@@ -121,7 +123,7 @@ def export_workbook(
     external.append(EXTERNAL_REFERENCE_COLUMNS)
     uses = _external_uses(inventory, profiles.mapping)
     for uri in ordered_external_uris:
-        usage = uses[uri]
+        usage = uses.get(uri, {"subjects": set(), "predicates": set(), "finding_ids": []})
         reference = existing_references.get(uri, {})
         identifier = reference.get("identifier", catalog_identifiers.get(uri, ""))
         namespace_id = reference.get("reference_namespace", catalog_namespace_id if identifier else "")
@@ -152,6 +154,30 @@ def export_workbook(
 
 
 def check_workbook(path: Path, profiles: GenerationProfiles, inventory: Inventory) -> dict[str, object]:
+    report, _ = _checked_workbook(path, profiles, inventory)
+    return report
+
+
+def refresh_workbook(path: Path, profiles: GenerationProfiles, inventory: Inventory) -> dict[str, object]:
+    """Persist only derived validation and presentation data in a workbook."""
+    report, workbook = _checked_workbook(path, profiles, inventory)
+    if not report["valid"]:
+        return report
+    _annotate_workbook(workbook, report["issues"])
+    workbook.save(path)
+    return report
+
+
+def annotate_workbook(path: Path, profiles: GenerationProfiles, inventory: Inventory, issues: list[dict[str, object]]) -> None:
+    """Add normalized, derived issues without changing mapping decisions."""
+    report, workbook = _checked_workbook(path, profiles, inventory)
+    if not report["valid"]:
+        raise AssistantError("Workbook cannot be annotated until its validation errors are resolved")
+    _annotate_workbook(workbook, issues)
+    workbook.save(path)
+
+
+def _checked_workbook(path: Path, profiles: GenerationProfiles, inventory: Inventory) -> tuple[dict[str, object], object]:
     workbook = _load_workbook(path)
     issues: list[dict[str, object]] = []
     _check_metadata(workbook, profiles, inventory, issues)
@@ -162,21 +188,19 @@ def check_workbook(path: Path, profiles: GenerationProfiles, inventory: Inventor
     if not issues:
         _validate_rows(workbook, issues)
     report = {"format_version": "1.0", "workbook": str(path), "valid": not any(issue["severity"] == "error" for issue in issues), "issues": issues}
-    _annotate_workbook(workbook, report)
-    workbook.save(path)
-    return report
+    return report, workbook
 
 
 def compile_workbook(path: Path, profiles: GenerationProfiles, inventory: Inventory) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
-    report = check_workbook(path, profiles, inventory)
+    report, workbook = _checked_workbook(path, profiles, inventory)
     if not report["valid"]:
         raise AssistantError("Workbook has blocking validation errors")
-    workbook = _load_workbook(path)
     rules = [_rule_from_row(row) for row in _sheet_rows(workbook["RULES"], RULE_COLUMNS) if row["id"]]
     namespaces = [_namespace_from_row(row) for row in _sheet_rows(workbook["_external_namespaces"], NAMESPACE_COLUMNS) if row["uri"]]
     references = [_reference_from_row(row) for row in _sheet_rows(workbook["_external_terms"], TERM_COLUMNS) if row["uri"]]
     mapping = {"format_version": "2.0", "scope": profiles.mapping["scope"], "rules": rules, "external_references": references}
     registry = {"format_version": "1.0", "namespaces": namespaces}
+    validate_compiled_profiles(mapping, registry, profiles)
     report["provenance"] = {
         "workbook_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
         "source_sha256": inventory.source_sha256,
@@ -185,6 +209,37 @@ def compile_workbook(path: Path, profiles: GenerationProfiles, inventory: Invent
         "xsd_sha256": profiles.capability["xsd"]["sha256"],
     }
     return mapping, registry, report
+
+
+def validate_compiled_profiles(mapping: dict[str, object], registry: dict[str, object], profiles: GenerationProfiles) -> None:
+    """Validate exactly the YAML documents that compile would publish."""
+    for value, schema_name in ((mapping, "schemas/config/mapping-profile-2.0.schema.json"), (registry, "schemas/config/namespace-registry.schema.json")):
+        schema = json.loads(package_resource_path(schema_name).read_text(encoding="utf-8"))
+        errors = sorted(Draft202012Validator(schema, format_checker=FormatChecker()).iter_errors(value), key=str)
+        if errors:
+            raise AssistantError(f"Compiled profile is invalid: {errors[0].message}")
+    namespace_ids = [item["ontome_namespace_id"] for item in registry["namespaces"]]
+    if len(namespace_ids) != len(set(namespace_ids)):
+        raise AssistantError("OntoME namespace identifiers must be unique")
+    namespace_by_id = {item["ontome_namespace_id"]: item for item in registry["namespaces"]}
+    rule_ids = [item["id"] for item in mapping["rules"]]
+    if len(rule_ids) != len(set(rule_ids)):
+        raise AssistantError("Mapping rule identifiers must be unique")
+    reference_uris = [item["uri"] for item in mapping["external_references"]]
+    if len(reference_uris) != len(set(reference_uris)):
+        raise AssistantError("External reference URIs must be unique")
+    for reference in mapping["external_references"]:
+        namespace = namespace_by_id.get(reference["reference_namespace"])
+        if namespace is None:
+            raise AssistantError("External reference namespace is absent from the namespace registry")
+        if namespace["status"] == "forbidden":
+            raise AssistantError("External reference namespace is forbidden")
+        if not reference["uri"].startswith(namespace["uri"]):
+            raise AssistantError("External reference URI does not belong to its namespace registry entry")
+    try:
+        validate_generation_mapping(mapping, profiles.capability)
+    except ProfileError as error:
+        raise AssistantError(str(error)) from error
 
 
 def dump_yaml(value: dict[str, object]) -> bytes:
@@ -242,6 +297,15 @@ def _validate_rows(workbook: object, issues: list[dict[str, object]]) -> None:
             issues.append(_issue("error", "RULES", row_number, "An exclusion requires a reason."))
         elif row["action"] == "configure" and not row["decision_needed"]:
             issues.append(_issue("error", "RULES", row_number, "A configured rule requires a decision description."))
+        for column in ("relations_json", "text_fields_json"):
+            if row[column]:
+                try:
+                    value = json.loads(str(row[column]))
+                except json.JSONDecodeError:
+                    issues.append(_issue("error", "RULES", row_number, f"{column} must contain valid JSON."))
+                else:
+                    if not isinstance(value, list):
+                        issues.append(_issue("error", "RULES", row_number, f"{column} must contain a JSON array."))
     for sheet_name in ("CLASSES", "PROPERTIES"):
         for row_number, row in enumerate(_sheet_rows(workbook[sheet_name], RESOURCE_COLUMNS), start=2):
             if not row["uri"]:
@@ -251,7 +315,10 @@ def _validate_rows(workbook: object, issues: list[dict[str, object]]) -> None:
                 issues.append(_issue("error", sheet_name, row_number, "No mapping rule covers this resource."))
             elif len(matches) > 1:
                 issues.append(_issue("error", sheet_name, row_number, "More than one mapping rule covers this resource."))
-    namespace_ids = {int(row["ontome_namespace_id"]) for row in _sheet_rows(workbook["_external_namespaces"], NAMESPACE_COLUMNS) if row["uri"] and str(row["ontome_namespace_id"]).isdigit()}
+    namespace_values = [int(row["ontome_namespace_id"]) for row in _sheet_rows(workbook["_external_namespaces"], NAMESPACE_COLUMNS) if row["uri"] and str(row["ontome_namespace_id"]).isdigit()]
+    namespace_ids = set(namespace_values)
+    if len(namespace_ids) != len(namespace_values):
+        issues.append(_issue("error", "_external_namespaces", 0, "OntoME namespace identifiers must be unique."))
     references: set[str] = set()
     for row_number, row in enumerate(_sheet_rows(workbook["_external_terms"], TERM_COLUMNS), start=2):
         if not row["uri"]:
@@ -349,9 +416,12 @@ def _sync_external_reference_rows(workbook: object) -> None:
         (str(row["uri"]), row["ontome_namespace_id"]): row["source"]
         for row in _sheet_rows(namespaces, NAMESPACE_COLUMNS) if row["uri"]
     }
+    existing_namespaces = [tuple(row[column] for column in NAMESPACE_COLUMNS) for row in _sheet_rows(namespaces, NAMESPACE_COLUMNS) if row["uri"]]
     terms.delete_rows(2, max(0, terms.max_row - 1))
     namespaces.delete_rows(2, max(0, namespaces.max_row - 1))
-    namespace_rows: dict[tuple[str, object], tuple[object, ...]] = {}
+    namespace_rows: dict[tuple[str, object], tuple[object, ...]] = {
+        (str(row[0]), row[1]): row for row in existing_namespaces
+    }
     for row in _sheet_rows(workbook["EXTERNAL_REFERENCES"], EXTERNAL_REFERENCE_COLUMNS):
         if not row["uri"]:
             continue
@@ -415,16 +485,23 @@ def _add_validations(rules: object, namespaces: object) -> None:
     status.add("C2:C1048576")
 
 
-def _issue(severity: str, sheet: str, row: int, message: str) -> dict[str, object]:
-    return {"severity": severity, "sheet": sheet, "row": row, "message": message}
+def _issue(severity: str, sheet: str, row: int, message: str, **context: object) -> dict[str, object]:
+    return {"severity": severity, "sheet": sheet, "row": row, "message": message, **context}
 
 
-def _annotate_workbook(workbook: object, report: dict[str, object]) -> None:
+def _annotate_workbook(workbook: object, issues: list[dict[str, object]]) -> None:
     validation = workbook["VALIDATION"]
     if validation.max_row > 1:
         validation.delete_rows(2, validation.max_row - 1)
-    for issue in report["issues"]:
-        validation.append((issue["severity"], issue["sheet"], issue["row"], issue["message"]))
+    validation.delete_rows(1, 1)
+    validation.append(("phase", "severity", "sheet", "row", "resource_uri", "mapping_rule", "external_uri", "triple_ids", "code", "message"))
+    for issue in issues:
+        validation.append((
+            issue.get("phase", "workbook"), issue["severity"], issue.get("sheet", "VALIDATION"), issue.get("row", 0),
+            issue.get("resource_uri", ""), issue.get("mapping_rule", ""), issue.get("external_uri", ""),
+            " | ".join(issue.get("triple_ids", [])), issue.get("code", ""), issue["message"],
+        ))
+    _clear_fills(workbook)
     for sheet_name in ("CLASSES", "PROPERTIES", "EXTERNAL_REFERENCES", "METADATA", "BLOCKERS"):
         sheet = workbook[sheet_name]
         for row in range(2, sheet.max_row + 1):
@@ -435,6 +512,45 @@ def _annotate_workbook(workbook: object, report: dict[str, object]) -> None:
                 for cell in sheet[row]:
                     cell.fill = fill
     for row in range(2, validation.max_row + 1):
-        if validation.cell(row, 1).value == "error":
+        if validation.cell(row, 2).value == "error":
             for cell in validation[row]:
                 cell.fill = RED
+    for issue in issues:
+        _color_issue(workbook, issue)
+
+
+def _clear_fills(workbook: object) -> None:
+    for sheet_name in ("CLASSES", "PROPERTIES", "EXTERNAL_REFERENCES", "RULES", "METADATA", "BLOCKERS", "VALIDATION"):
+        if sheet_name not in workbook.sheetnames:
+            continue
+        for row in workbook[sheet_name].iter_rows():
+            for cell in row:
+                cell.fill = PatternFill()
+
+
+def _color_issue(workbook: object, issue: dict[str, object]) -> None:
+    fill = RED if issue["severity"] == "error" else ORANGE
+    sheet_name = str(issue.get("sheet", ""))
+    row = issue.get("row")
+    if sheet_name in workbook.sheetnames and isinstance(row, int) and row >= 2:
+        for cell in workbook[sheet_name][row]:
+            cell.fill = fill
+    resource_uri = str(issue.get("resource_uri", ""))
+    mapping_rule = str(issue.get("mapping_rule", ""))
+    external_uri = str(issue.get("external_uri", ""))
+    for name in ("CLASSES", "PROPERTIES"):
+        if resource_uri and name in workbook.sheetnames:
+            for candidate in range(2, workbook[name].max_row + 1):
+                if workbook[name].cell(candidate, 1).value == resource_uri:
+                    for cell in workbook[name][candidate]:
+                        cell.fill = fill
+    if mapping_rule and "RULES" in workbook.sheetnames:
+        for candidate in range(2, workbook["RULES"].max_row + 1):
+            if workbook["RULES"].cell(candidate, 1).value == mapping_rule:
+                for cell in workbook["RULES"][candidate]:
+                    cell.fill = fill
+    if external_uri and "EXTERNAL_REFERENCES" in workbook.sheetnames:
+        for candidate in range(2, workbook["EXTERNAL_REFERENCES"].max_row + 1):
+            if workbook["EXTERNAL_REFERENCES"].cell(candidate, 1).value == external_uri:
+                for cell in workbook["EXTERNAL_REFERENCES"][candidate]:
+                    cell.fill = fill

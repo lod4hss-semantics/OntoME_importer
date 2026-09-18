@@ -65,6 +65,9 @@ def load_generation_profiles(manifest_path: str | Path) -> GenerationProfiles:
     uris = [reference["uri"] for reference in references]
     if len(uris) != len(set(uris)):
         raise ProfileError("External reference URIs must be unique")
+    namespace_ids = [item["ontome_namespace_id"] for item in registry["namespaces"]]
+    if len(namespace_ids) != len(set(namespace_ids)):
+        raise ProfileError("OntoME namespace identifiers must be unique")
     namespaces = {item["ontome_namespace_id"]: item for item in registry["namespaces"]}
     for reference in references:
         namespace = namespaces.get(reference["reference_namespace"])
@@ -74,7 +77,7 @@ def load_generation_profiles(manifest_path: str | Path) -> GenerationProfiles:
             raise ProfileError("External reference namespace is forbidden")
         if not str(reference["uri"]).startswith(str(namespace["uri"])):
             raise ProfileError("External reference URI does not belong to its namespace registry entry")
-    _validate_generation_mapping(mapping, capability)
+    validate_generation_mapping(mapping, capability)
     return GenerationProfiles(manifest, capability, registry, mapping)
 
 
@@ -117,7 +120,7 @@ def _load_and_validate(path: Path, schema_relative_path: str) -> dict[str, objec
     return document
 
 
-def _validate_generation_mapping(mapping: dict[str, object], capability: dict[str, object]) -> None:
+def validate_generation_mapping(mapping: dict[str, object], capability: dict[str, object]) -> None:
     xml = capability["xml"]
     assert isinstance(xml, dict)
     for rule in mapping["rules"]:

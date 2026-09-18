@@ -2,7 +2,7 @@
 
 Run `ontome-importer init` before editing these files. It creates the audit and generation manifests plus the profile templates in a new workspace. This page explains the fields that the import team completes after reading the first audit report.
 
-The optional `ontome-importer assist` commands use an XLSX workbook as an editing surface. `assist compile` converts checked decisions into the same mapping profile 2.0 and namespace registry 1.0 described below; generation never reads XLSX directly.
+The standard `ontome-importer assist` workflow uses an XLSX workbook as the human editing surface. `assist compile` converts checked decisions into the same mapping profile 2.0 and namespace registry 1.0 described below; generation never reads XLSX directly. `assist check` is read-only; `assist refresh`, and the optional `--workbook` arguments of `generate` and `validate`, update only derived diagnostics in the workbook.
 
 `assist export` can receive an optional RDF catalog. A catalog is only authoritative for external identifiers when the caller explicitly supplies an identifier predicate and the predicate has exactly one literal value for each catalog URI. Otherwise it is not used to create mappings.
 

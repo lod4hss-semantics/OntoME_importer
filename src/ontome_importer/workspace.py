@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from importlib import resources
+import json
 from pathlib import Path
 import os
 import shutil
@@ -88,7 +89,7 @@ def _resolve_format(source: Path, source_format: str | None) -> str:
 
 def _is_uri(value: str) -> bool:
     parsed = urlparse(value)
-    return bool(parsed.scheme and (parsed.netloc or parsed.scheme == "urn"))
+    return not any(character.isspace() for character in value) and bool(parsed.scheme and (parsed.netloc or parsed.scheme == "urn"))
 
 
 def _write_template(template: str, destination: Path) -> None:
@@ -99,11 +100,11 @@ def _audit_manifest(source_name: str, source_format: str, checksum: str, namespa
     return f'''# Created by ontome-importer init. Replace the target namespace before generation.
 format_version: "1.1"
 source:
-  file: ../source/{source_name}
+  file: {_yaml_string(f'../source/{source_name}')}
   format: {source_format}
   sha256: {checksum}
 target:
-  namespace_uri: {namespace_uri}
+  namespace_uri: {_yaml_string(namespace_uri)}
 profiles:
   capability: profiles/capability-audit.yaml
   namespace_registry: profiles/namespace-registry.yaml
@@ -116,11 +117,11 @@ def _generation_manifest(source_name: str, source_format: str, checksum: str, na
     return f'''# TODO: replace the target namespace and label before generation.
 format_version: "1.0"
 source:
-  file: ../source/{source_name}
+  file: {_yaml_string(f'../source/{source_name}')}
   format: {source_format}
   sha256: {checksum}
 target:
-  namespace_uri: {namespace_uri}
+  namespace_uri: {_yaml_string(namespace_uri)}
   labels:
     - lang: en
       value: REPLACE ME
@@ -133,7 +134,7 @@ strict: true
 
 
 def _audit_mapping(scope_prefixes: list[str]) -> str:
-    selectors = "".join(f"    - uri_prefix: {prefix}\n" for prefix in scope_prefixes)
+    selectors = "".join(f"    - uri_prefix: {_yaml_string(prefix)}\n" for prefix in scope_prefixes)
     return f'''# No rules are created automatically. Use the audit report to make decisions.
 format_version: "1.1"
 scope:
@@ -143,7 +144,7 @@ scope:
 
 
 def _generation_mapping(scope_prefixes: list[str]) -> str:
-    selectors = "".join(f"    - uri_prefix: {prefix}\n" for prefix in scope_prefixes)
+    selectors = "".join(f"    - uri_prefix: {_yaml_string(prefix)}\n" for prefix in scope_prefixes)
     return f'''# TODO: add explicit class and property mapping rules after the audit.
 format_version: "2.0"
 scope:
@@ -164,14 +165,25 @@ Votre source RDF copiée est `source/{source_name}`.
 ontome-importer audit --manifest config/audit.yaml --generation-manifest config/generation.yaml --output-dir build/audit --workbook decisions/mapping.xlsx
 ```
 
-Travaillez dans `decisions/mapping.xlsx` avec l'équipe d'import. Le premier audit signale normalement des blocages : aucune décision de mapping n'a encore été prise.
+Travaillez dans `decisions/mapping.xlsx` avec l'équipe d'import. Le premier audit signale normalement des blocages : aucune décision de mapping n'a encore été prise. Après vos décisions, contrôlez puis compilez le classeur ; les YAML compilés restent les entrées de génération.
 
-Après les décisions de l'équipe sur les éléments à importer, complétez `config/profiles/mapping-generation.yaml` et remplacez les valeurs `TODO` dans `config/generation.yaml`.
+Après les décisions de l'équipe sur les éléments à importer, remplacez les valeurs `TODO` dans `config/generation.yaml`, puis exécutez :
+
+```bash
+ontome-importer assist check --manifest config/generation.yaml --workbook decisions/mapping.xlsx --output build/assistant/check-report.json
+ontome-importer assist refresh --manifest config/generation.yaml --workbook decisions/mapping.xlsx --output build/assistant/refresh-report.json
+ontome-importer assist compile --manifest config/generation.yaml --workbook decisions/mapping.xlsx --mapping-output config/profiles/mapping-generation.yaml --registry-output config/profiles/namespace-registry.yaml --report-output build/assistant/compile-report.json
+```
 
 Exécutez ensuite :
 
 ```bash
-ontome-importer generate --manifest config/generation.yaml --output-dir build/import
-ontome-importer validate --manifest config/generation.yaml --xml build/import/import.xml --trace build/import/generation-trace.json --audit build/import/generation-audit.json --output build/import/validation.json
+ontome-importer generate --manifest config/generation.yaml --output-dir build/import --workbook decisions/mapping.xlsx
+ontome-importer validate --manifest config/generation.yaml --xml build/import/import.xml --trace build/import/generation-trace.json --audit build/import/generation-audit.json --output build/import/validation.json --workbook decisions/mapping.xlsx
 ```
 '''
+
+
+def _yaml_string(value: str) -> str:
+    """JSON strings are valid YAML scalars and cannot alter its document structure."""
+    return json.dumps(value, ensure_ascii=False)

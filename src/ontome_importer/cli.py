@@ -14,7 +14,7 @@ from pathlib import Path
 from ontome_importer import __version__
 from ontome_importer.audit import audit_inventory
 from ontome_importer.loader import RdfLoadError, load_inventory
-from ontome_importer.mapping_assistant import AssistantError, check_workbook, compile_workbook, dump_yaml, export_workbook
+from ontome_importer.mapping_assistant import AssistantError, annotate_workbook, check_workbook, compile_workbook, dump_yaml, export_workbook, refresh_workbook
 from ontome_importer.profiles import ProfileError, load_audit_profiles, load_generation_profiles, verify_capability_xsd, verify_source_checksum
 from ontome_importer.resolution import resolve_generation
 from ontome_importer.validator import validate_generation
@@ -41,12 +41,14 @@ def build_parser() -> argparse.ArgumentParser:
     generate = commands.add_parser("generate", help="Generate OntoME XML from resolved mappings.")
     generate.add_argument("--manifest", required=True, help="Path to an import manifest 1.0 with mapping profile 2.0.")
     generate.add_argument("--output-dir", required=True, help="Directory for generated XML and reports.")
+    generate.add_argument("--workbook", help="Optional XLSX workbook to annotate with generation diagnostics.")
     validate = commands.add_parser("validate", help="Validate a generated OntoME XML import.")
     validate.add_argument("--manifest", required=True, help="Path to the generation import manifest.")
     validate.add_argument("--xml", required=True, help="Path to import.xml.")
     validate.add_argument("--trace", required=True, help="Path to generation-trace.json.")
     validate.add_argument("--audit", required=True, help="Path to generation-audit.json.")
     validate.add_argument("--output", required=True, help="Path for validation.json.")
+    validate.add_argument("--workbook", help="Optional XLSX workbook to annotate with validation diagnostics.")
     assist = commands.add_parser("assist", help="Create and compile an XLSX mapping decision workbook.")
     assist_commands = assist.add_subparsers(dest="assist_command", required=True)
     export = assist_commands.add_parser("export", help="Create an XLSX workbook from a generation manifest.")
@@ -60,6 +62,10 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument("--manifest", required=True, help="Path to a generation import manifest.")
     check.add_argument("--workbook", required=True, help="XLSX workbook path.")
     check.add_argument("--output", required=True, help="Path for the JSON check report.")
+    refresh = assist_commands.add_parser("refresh", help="Annotate an XLSX workbook with current validation diagnostics.")
+    refresh.add_argument("--manifest", required=True, help="Path to a generation import manifest.")
+    refresh.add_argument("--workbook", required=True, help="XLSX workbook path to update.")
+    refresh.add_argument("--output", required=True, help="Path for the JSON refresh report.")
     compile_ = assist_commands.add_parser("compile", help="Compile checked XLSX decisions into YAML profiles.")
     compile_.add_argument("--manifest", required=True, help="Path to a generation import manifest.")
     compile_.add_argument("--workbook", required=True, help="XLSX workbook path.")
@@ -126,7 +132,7 @@ def _run_audit(args: argparse.Namespace) -> int:
             "audit.md": report.to_markdown().encode("utf-8"),
         })
         return 0
-    except (ProfileError, RdfLoadError, OSError) as error:
+    except (AssistantError, ProfileError, RdfLoadError, OSError) as error:
         print(f"ontome-importer audit: {error}", file=sys.stderr)
         return 2
 
@@ -145,6 +151,8 @@ def _run_generate(args: argparse.Namespace) -> int:
         output_dir = Path(args.output_dir)
         if result.generation is None:
             _publish_files(output_dir, {"generation-audit.json": _json(result.audit).encode("utf-8")})
+            if args.workbook:
+                annotate_workbook(Path(args.workbook), profiles, inventory, _generation_issues(result.audit, inventory))
             print("ontome-importer generate: generation blocked; see generation-audit.json", file=sys.stderr)
             return 3
         xml, trace = write_xml(result.generation, profiles.capability, xsd_path, inventory.source_sha256)
@@ -153,11 +161,13 @@ def _run_generate(args: argparse.Namespace) -> int:
             "generation-trace.json": _json(trace).encode("utf-8"),
             "generation-audit.json": _json(result.audit).encode("utf-8"),
         })
+        if args.workbook:
+            annotate_workbook(Path(args.workbook), profiles, inventory, _generation_issues(result.audit, inventory))
         return 0
     except XmlGenerationError as error:
         print(f"ontome-importer generate: {error}", file=sys.stderr)
         return 3
-    except (ProfileError, RdfLoadError, OSError) as error:
+    except (AssistantError, ProfileError, RdfLoadError, OSError) as error:
         print(f"ontome-importer generate: {error}", file=sys.stderr)
         return 2
 
@@ -188,11 +198,20 @@ def _run_assist(args: argparse.Namespace) -> int:
             output = Path(args.output)
             _publish_files(output.parent, {output.name: _json(report).encode("utf-8")})
             return 0 if report["valid"] else 3
+        if args.assist_command == "refresh":
+            report = refresh_workbook(workbook, profiles, inventory)
+            output = Path(args.output)
+            _publish_files(output.parent, {output.name: _json(report).encode("utf-8")})
+            return 0 if report["valid"] else 3
         mapping, registry, report = compile_workbook(workbook, profiles, inventory)
-        _replace_file(Path(args.mapping_output), dump_yaml(mapping))
-        _replace_file(Path(args.registry_output), dump_yaml(registry))
-        output = Path(args.report_output)
-        _publish_files(output.parent, {output.name: _json(report).encode("utf-8")})
+        compilation_paths = (Path(args.mapping_output), Path(args.registry_output), Path(args.report_output))
+        if len({path.resolve() for path in compilation_paths}) != len(compilation_paths):
+            raise AssistantError("Compilation output paths must be distinct")
+        _publish_compilation({
+            compilation_paths[0]: dump_yaml(mapping),
+            compilation_paths[1]: dump_yaml(registry),
+            compilation_paths[2]: _json(report).encode("utf-8"),
+        })
         return 0
     except (AssistantError, ProfileError, RdfLoadError, OSError, ValueError) as error:
         print(f"ontome-importer assist: {error}", file=sys.stderr)
@@ -208,8 +227,15 @@ def _run_validate(args: argparse.Namespace) -> int:
         report = validate_generation(Path(args.manifest), Path(args.xml), Path(args.trace), Path(args.audit))
         output = Path(args.output)
         _publish_files(output.parent, {output.name: _json(report).encode("utf-8")})
+        if args.workbook:
+            manifest_path = Path(args.manifest)
+            profiles = load_generation_profiles(manifest_path)
+            source = profiles.manifest["source"]
+            assert isinstance(source, dict)
+            inventory = load_inventory(manifest_path.parent / str(source["file"]), str(source["format"]))
+            annotate_workbook(Path(args.workbook), profiles, inventory, _validation_issues(report))
         return 0 if report["valid"] else 3
-    except (ProfileError, RdfLoadError, OSError) as error:
+    except (AssistantError, ProfileError, RdfLoadError, OSError) as error:
         print(f"ontome-importer validate: {error}", file=sys.stderr)
         return 2
 
@@ -231,14 +257,83 @@ def _publish_files(output_dir: Path, files: dict[str, bytes]) -> None:
         shutil.rmtree(staging, ignore_errors=True)
 
 
-def _replace_file(path: Path, content: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.tmp")
+def _publish_compilation(files: dict[Path, bytes]) -> None:
+    """Publish compiled artifacts together and restore every prior file on failure."""
+    destinations = list(files)
+    if len({path.resolve() for path in destinations}) != len(destinations):
+        raise AssistantError("Compilation output paths must be distinct")
+    temporaries: dict[Path, Path] = {}
+    backups: dict[Path, Path] = {}
+    published: set[Path] = set()
     try:
-        temporary.write_bytes(content)
-        os.replace(temporary, path)
+        for path, content in files.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+            with os.fdopen(descriptor, "wb") as temporary:
+                temporary.write(content)
+                temporary.flush()
+                os.fsync(temporary.fileno())
+            temporaries[path] = Path(temporary_name)
+        for path in destinations:
+            if path.exists():
+                backup = path.with_name(f".{path.name}.backup")
+                if backup.exists():
+                    raise OSError(f"Stale compilation backup exists: {backup}")
+                os.replace(path, backup)
+                backups[path] = backup
+            os.replace(temporaries[path], path)
+            published.add(path)
+        for backup in backups.values():
+            backup.unlink(missing_ok=True)
+    except Exception:
+        for path in destinations:
+            if path in backups:
+                path.unlink(missing_ok=True)
+                os.replace(backups[path], path)
+            elif path in published:
+                path.unlink(missing_ok=True)
+        raise
     finally:
-        temporary.unlink(missing_ok=True)
+        for temporary in temporaries.values():
+            temporary.unlink(missing_ok=True)
+        for backup in backups.values():
+            backup.unlink(missing_ok=True)
+
+
+def _generation_issues(audit: dict[str, object], inventory: object) -> list[dict[str, object]]:
+    triples = {item.id: item for item in inventory.triples}
+    issues: list[dict[str, object]] = []
+    for finding in audit.get("findings", []):
+        status = str(finding.get("status", ""))
+        if status not in {"blocked", "invalid", "configured"}:
+            continue
+        triple_ids = list(finding.get("triple_ids", []))
+        external_uri = ""
+        for triple_id in triple_ids:
+            triple = triples.get(triple_id)
+            if triple and triple.object.kind == "uri":
+                external_uri = triple.object.value
+                break
+        resource = finding.get("resource", {})
+        issues.append({
+            "phase": "generation", "severity": "error", "sheet": "VALIDATION", "row": 0,
+            "resource_uri": resource.get("value", "") if isinstance(resource, dict) else "",
+            "mapping_rule": finding.get("mapping_rule", ""), "external_uri": external_uri,
+            "triple_ids": triple_ids, "code": status, "message": finding.get("reason", "Generation is blocked."),
+        })
+    if not issues:
+        issues.append({"phase": "generation", "severity": "info", "sheet": "VALIDATION", "row": 0, "code": "success", "message": "Generation completed successfully."})
+    return issues
+
+
+def _validation_issues(report: dict[str, object]) -> list[dict[str, object]]:
+    issues = [
+        {"phase": "validation", "severity": "error", "sheet": "VALIDATION", "row": 0, "code": check["name"], "message": check.get("message", str(check["name"]))}
+        for check in report.get("checks", []) if not check["valid"]
+    ]
+    if not issues:
+        issues.append({"phase": "validation", "severity": "info", "sheet": "VALIDATION", "row": 0, "code": "success", "message": "Validation completed successfully."})
+    return issues
 
 
 if __name__ == "__main__":

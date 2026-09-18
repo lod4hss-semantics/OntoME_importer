@@ -23,7 +23,7 @@ def test_init_creates_a_valid_auditable_workspace(tmp_path, capsys):
     assert copied.read_bytes() == SOURCE.read_bytes()
     manifest = (workspace / "config/audit.yaml").read_text()
     assert hashlib.sha256(copied.read_bytes()).hexdigest() in manifest
-    assert "file: ../source/ontology.rdf" in manifest
+    assert 'file: "../source/ontology.rdf"' in manifest
     profiles = load_audit_profiles(workspace / "config/audit.yaml")
     verify_capability_xsd(profiles.capability)
     generation = load_generation_profiles(workspace / "config/generation.yaml")

@@ -38,11 +38,13 @@ flowchart TD
     O([Vous installez l'outil<br/>une seule fois])
     A([Vous choisissez une ontologie RDF<br/>pour un projet d'import])
     P[/"Vous lancez init : l'outil crée<br/>un espace de travail pour ce projet"/]
-    B[/"L'outil réalise l'audit"/]
-    C[[Inventaire RDF et rapport des blocages]]
-    D([L'équipe lit le rapport])
+    B[/"L'outil réalise l'audit<br/>et crée le classeur de mapping"/]
+    C[[Inventaire RDF, résumé<br/>et classeur XLSX]]
+    D([L'équipe travaille dans le classeur XLSX])
     E([Discussion et décisions d'import])
-    F([Profils YAML mis à jour])
+    F[/"L'outil contrôle le classeur<br/>et signale les blocages"/]
+    Q{Le classeur est-il<br/>complet ?}
+    R[/"L'outil compile les YAML<br/>depuis le classeur"/]
     G[/"L'outil tente de générer le XML OntoME"/]
     H{Toutes les décisions<br/>sont-elles complètes ?}
     I[[Rapport de génération :<br/>ce qui bloque]]
@@ -59,7 +61,10 @@ flowchart TD
     C --> D
     D --> E
     E --> F
-    F --> G
+    F --> Q
+    Q -- Non --> D
+    Q -- Oui --> R
+    R --> G
     G --> H
     H -- Non --> I
     I --> D
@@ -75,10 +80,10 @@ flowchart TD
     classDef livrable fill:#E7F8EE,stroke:#16A34A,color:#14532D;
     classDef decision fill:#F3E8FF,stroke:#9333EA,color:#3B0764;
 
-    class O,A,D,E,F humain;
-    class P,B,G,K outil;
+    class O,A,D,E humain;
+    class P,B,F,R,G,K outil;
     class C,I,J,M,N livrable;
-    class H,L decision;
+    class H,L,Q decision;
 ```
 
 ## Installer l'outil
@@ -249,7 +254,16 @@ ontome-importer assist compile \
   --report-output build/assistant/compile-report.json
 ```
 
-`assist check` met à jour les onglets de validation et les couleurs du même classeur, sans modifier les décisions saisies. `assist compile` refuse les décisions incomplètes et remplace les deux YAML indiqués uniquement après contrôle réussi.
+`assist check` est en lecture seule : il produit un rapport sans modifier le classeur. Pour mettre à jour les onglets de validation et les couleurs du même classeur, sans modifier les décisions saisies, utilisez `assist refresh` :
+
+```bash
+ontome-importer assist refresh \
+  --manifest config/generation.yaml \
+  --workbook decisions/mapping.xlsx \
+  --output build/assistant/refresh-report.json
+```
+
+`assist compile` refuse les décisions incomplètes, valide les YAML compilés avant publication et refuse les chemins de sortie en conflit. En cas d'échec, les profils existants restent inchangés.
 
 Un catalogue RDF externe est facultatif. Lorsqu'il porte un identifiant canonique unique pour chaque URI, l'assistant peut préremplir les références exactes ; vous indiquez explicitement le prédicat qui porte cet identifiant et le namespace OntoME correspondant :
 
@@ -281,7 +295,8 @@ Lorsque le mapping de génération est complet :
 ```bash
 ontome-importer generate \
   --manifest config/generation.yaml \
-  --output-dir build/import
+  --output-dir build/import \
+  --workbook decisions/mapping.xlsx
 ```
 
 Cette commande relit la source, refait l'audit, résout le mapping, écrit le XML et le valide contre le XSD OntoME.
@@ -292,7 +307,7 @@ En succès, elle écrit :
 - `build/import/generation-trace.json` ;
 - `build/import/generation-audit.json`.
 
-En cas de blocage, elle écrit seulement `generation-audit.json`. Elle n'écrit jamais de XML final incomplet.
+En cas de blocage, elle écrit seulement `generation-audit.json`. Elle n'écrit jamais de XML final incomplet. Lorsque `--workbook` est fourni, les blocages sont aussi reportés dans le classeur, sans modifier les décisions saisies.
 
 ### 4. Valider le résultat
 
@@ -302,10 +317,11 @@ ontome-importer validate \
   --xml build/import/import.xml \
   --trace build/import/generation-trace.json \
   --audit build/import/generation-audit.json \
-  --output build/import/validation.json
+  --output build/import/validation.json \
+  --workbook decisions/mapping.xlsx
 ```
 
-Cette commande vérifie le XML, le XSD, les identifiants, les références, les checksums, la trace et la cohérence avec votre RDF et vos profils.
+Cette commande vérifie le XML, le XSD, les identifiants, les références, les checksums, la trace et la cohérence avec votre RDF et vos profils. Lorsque `--workbook` est fourni, ses erreurs sont également inscrites dans l'onglet `VALIDATION`.
 
 Le XML et ses rapports sont prêts à transmettre seulement lorsque `build/import/validation.json` contient :
 
