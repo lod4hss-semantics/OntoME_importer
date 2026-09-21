@@ -248,7 +248,7 @@ def _check_entity_type(resource: RdfTerm, target: dict[str, object], triples: li
 
 
 def _check_unhandled(triples: list[InventoryTriple], handled: set[str], resource: RdfTerm, rule: str, findings: list[dict[str, object]]) -> None:
-    relevant = {f"{RDFS}label", f"{SKOS}prefLabel", f"{RDFS}comment", f"{SKOS}scopeNote", f"{SKOS}example", f"{RDFS}subClassOf", f"{RDFS}subPropertyOf", f"{OWL}equivalentClass", f"{OWL}equivalentProperty", f"{OWL}inverseOf"}
+    relevant = {f"{RDFS}label", f"{SKOS}prefLabel", f"{RDFS}comment", f"{SKOS}scopeNote", f"{SKOS}example", f"{RDFS}isDefinedBy", f"{RDFS}subClassOf", f"{RDFS}subPropertyOf", f"{OWL}equivalentClass", f"{OWL}equivalentProperty", f"{OWL}inverseOf"}
     for triple in triples:
         if triple.predicate.value in relevant and triple.predicate.value not in handled:
             findings.append(_issue("blocked", resource, (triple.id,), rule, "Supported RDF assertion has no explicit generation mapping."))

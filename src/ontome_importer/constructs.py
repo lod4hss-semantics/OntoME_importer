@@ -32,6 +32,22 @@ PREDICATE_CONSTRUCTS = {
 CARDINALITY_PREDICATES = {f"{OWL}{name}" for name in ("cardinality", "minCardinality", "maxCardinality", "qualifiedCardinality", "minQualifiedCardinality", "maxQualifiedCardinality")}
 CHARACTERISTICS = {f"{OWL}{name}" for name in ("FunctionalProperty", "InverseFunctionalProperty", "TransitiveProperty", "SymmetricProperty", "AsymmetricProperty", "ReflexiveProperty", "IrreflexiveProperty")}
 KNOWN_DATATYPES = {f"{XSD}{name}" for name in ("string", "boolean", "decimal", "integer", "int", "float", "double", "date", "dateTime", "time", "anyURI")}
+SEMANTIC_CONSTRUCTS = frozenset({
+    "rdfs_class", "owl_class", "rdf_property", "object_property", "datatype_property", "annotation_property",
+    "named_individual", "restriction", "restriction_property", "label", "comment", "scope_note", "example",
+    "definition_link", "subclass_of", "subproperty_of", "equivalent_class", "equivalent_property", "inverse_of",
+    "named_domain", "named_range", "anonymous_class", "union", "intersection", "property_chain", "cardinality",
+    "disjointness", "property_characteristic", "rdf_list_structure", "unknown_datatype", "missing_domain",
+    "missing_range", "missing_label_language", "punning", "unknown_predicate", "unknown_rdf_type",
+    "unknown_namespace", "forbidden_namespace", "missing_external_reference",
+})
+RELATION_FIELDS = {
+    f"{RDFS}subClassOf": "subClassOf",
+    f"{RDFS}subPropertyOf": "subPropertyOf",
+    f"{OWL}equivalentClass": "equivalentClass",
+    f"{OWL}equivalentProperty": "equivalentProperty",
+    f"{OWL}inverseOf": "inverseOf",
+}
 
 
 @dataclass(frozen=True)
@@ -66,7 +82,7 @@ def detect_constructs(inventory: Inventory) -> tuple[ConstructOccurrence, ...]:
             construct = TYPE_CONSTRUCTS.get(triple.object.value)
             if construct:
                 occurrences.append(_occurrence(construct, triple.subject, triple.id))
-                if construct in {"rdf_property", "object_property", "datatype_property", "annotation_property"}:
+                if construct in {"rdf_property", "object_property", "datatype_property"}:
                     property_terms.add(triple.subject)
             elif triple.object.value in CHARACTERISTICS:
                 occurrences.append(_occurrence("property_characteristic", triple.subject, triple.id))
@@ -80,7 +96,11 @@ def detect_constructs(inventory: Inventory) -> tuple[ConstructOccurrence, ...]:
                 occurrences.append(_occurrence(construct, triple.subject, triple.id))
         elif triple.predicate.value in CARDINALITY_PREDICATES:
             occurrences.append(_occurrence("cardinality", triple.subject, triple.id))
-        elif triple.predicate.value not in {f"{RDF}type", f"{RDF}first", f"{RDF}rest", f"{OWL}onProperty"}:
+        elif triple.predicate.value in {f"{RDF}first", f"{RDF}rest"}:
+            occurrences.append(_occurrence("rdf_list_structure", triple.subject, triple.id))
+        elif triple.predicate.value == f"{OWL}onProperty":
+            occurrences.append(_occurrence("restriction_property", triple.subject, triple.id))
+        elif triple.predicate.value != f"{RDF}type":
             occurrences.append(_occurrence("unknown_predicate", triple.subject, triple.id))
         if triple.object.kind == "literal" and triple.object.datatype and triple.object.datatype not in KNOWN_DATATYPES:
             occurrences.append(_occurrence("unknown_datatype", triple.subject, triple.id))

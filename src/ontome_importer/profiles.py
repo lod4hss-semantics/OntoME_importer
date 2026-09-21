@@ -10,6 +10,7 @@ from pathlib import Path
 import yaml
 from jsonschema import Draft202012Validator, FormatChecker
 
+from ontome_importer.constructs import RELATION_FIELDS, SEMANTIC_CONSTRUCTS
 from ontome_importer.package_resources import package_resource_path
 
 
@@ -40,6 +41,7 @@ def load_audit_profiles(manifest_path: str | Path) -> AuditProfiles:
     profiles = manifest["profiles"]
     assert isinstance(profiles, dict)
     capability = _load_and_validate(base / str(profiles["capability"]), "schemas/config/capability-profile-1.1.schema.json")
+    _validate_capability_constructs(capability)
     registry = _load_and_validate(base / str(profiles["namespace_registry"]), "schemas/config/namespace-registry.schema.json")
     mapping = _load_and_validate(base / str(profiles["mapping"]), "schemas/config/mapping-profile-1.1.schema.json")
     rule_ids = [rule["id"] for rule in mapping["rules"]]
@@ -56,6 +58,7 @@ def load_generation_profiles(manifest_path: str | Path) -> GenerationProfiles:
     profiles = manifest["profiles"]
     assert isinstance(profiles, dict)
     capability = _load_and_validate(base / str(profiles["capability"]), "schemas/config/capability-profile.schema.json")
+    _validate_capability_constructs(capability)
     registry = _load_and_validate(base / str(profiles["namespace_registry"]), "schemas/config/namespace-registry.schema.json")
     mapping = _load_and_validate(base / str(profiles["mapping"]), "schemas/config/mapping-profile-2.0.schema.json")
     rule_ids = [rule["id"] for rule in mapping["rules"]]
@@ -120,6 +123,12 @@ def _load_and_validate(path: Path, schema_relative_path: str) -> dict[str, objec
     return document
 
 
+def _validate_capability_constructs(capability: dict[str, object]) -> None:
+    unknown = sorted(set(capability["constructs"]) - SEMANTIC_CONSTRUCTS)
+    if unknown:
+        raise ProfileError(f"Capability profile declares an unknown semantic construct: {unknown[0]}")
+
+
 def validate_generation_mapping(mapping: dict[str, object], capability: dict[str, object]) -> None:
     xml = capability["xml"]
     assert isinstance(xml, dict)
@@ -137,5 +146,8 @@ def validate_generation_mapping(mapping: dict[str, object], capability: dict[str
         for relation in target.get("relations", []):
             if relation["field"] not in fields:
                 raise ProfileError(f"Mapping rule {rule['id']} targets a field not allowed by the capability profile")
+            expected = RELATION_FIELDS.get(relation["predicate"])
+            if expected != relation["field"]:
+                raise ProfileError(f"Mapping rule {rule['id']} uses an unsupported RDF predicate-to-XML relation mapping")
         if target.get("text_fields") and "textProperties" not in fields:
             raise ProfileError(f"Mapping rule {rule['id']} targets textProperties not allowed by the capability profile")

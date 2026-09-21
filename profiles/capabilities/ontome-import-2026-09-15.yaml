@@ -30,7 +30,6 @@ xml:
     - rangeInstancesMaxQuantifier
     - textProperties
 constructs:
-  rdf_class: supported
   rdfs_class: supported
   owl_class: supported
   object_property: supported
@@ -40,7 +39,7 @@ constructs:
   comment: supported
   scope_note: supported
   example: supported
-  definition_link: supported
+  definition_link: blocked
   subclass_of: supported
   subproperty_of: supported
   equivalent_class: supported
@@ -56,6 +55,8 @@ constructs:
   cardinality: blocked
   disjointness: blocked
   property_characteristic: blocked
+  rdf_list_structure: blocked
+  restriction_property: blocked
   annotation_property: blocked
   named_individual: blocked
   punning: blocked
@@ -64,4 +65,8 @@ constructs:
   missing_range: blocked
   missing_label_language: blocked
   unknown_namespace: blocked
+  forbidden_namespace: blocked
+  missing_external_reference: blocked
+  unknown_predicate: blocked
+  unknown_rdf_type: blocked
 unknown_construct_policy: blocked

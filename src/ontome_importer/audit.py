@@ -6,7 +6,7 @@ import json
 from collections import Counter
 from dataclasses import dataclass
 
-from ontome_importer.constructs import ConstructOccurrence, RDF, RDFS, OWL, SKOS, XSD, detect_constructs
+from ontome_importer.constructs import ConstructOccurrence, RELATION_FIELDS, RDF, RDFS, OWL, SKOS, XSD, detect_constructs
 from ontome_importer.inventory import Inventory, RdfTerm
 
 
@@ -32,7 +32,7 @@ class AuditReport:
 
     def to_markdown(self) -> str:
         data = self.to_dict()
-        lines = ["# RDF Audit", "", f"Strict result: {'pass' if data['strict_ok'] else 'blocked'}", "", "| Status | Count |", "| --- | ---: |"]
+        lines = ["# RDF Audit", "", f"Strict result: {'pass' if data['strict_ok'] else 'blocked'}", f"Out-of-scope observations: {len(self.observations)}", "", "| Status | Count |", "| --- | ---: |"]
         lines.extend(f"| {status} | {count} |" for status, count in data["counts"].items())
         grouped = Counter((finding["status"], finding["construct"]) for finding in self.findings)
         lines.extend(["", "## Decision Summary", "", "Findings are grouped below. A group may be covered by one explicit mapping rule; it does not imply one rule per finding.", "", "| Status | Construct | Count |", "| --- | --- | ---: |"])
@@ -59,12 +59,17 @@ def audit_inventory(
     triples = {triple.id: triple for triple in inventory.triples}
     occurrences = list(detect_constructs(inventory))
     for triple in inventory.triples:
-        if triple.object.kind != "uri" or _is_local_or_standard(triple.object, inventory, mapping):
+        if triple.object.kind != "uri" or _is_local(triple.object, inventory, mapping):
+            continue
+        if _is_standard(triple.object) and not _standard_reference_predicate(triple.predicate.value):
             continue
         status = _registered_namespace_status(triple.object.value, namespace_registry)
         if status == "forbidden":
             occurrences.append(ConstructOccurrence("forbidden_namespace", triple.subject, (triple.id,)))
-        elif status is None:
+            continue
+        if not _configured_external_reference(triple.object.value, mapping):
+            occurrences.append(ConstructOccurrence("missing_external_reference", triple.subject, (triple.id,)))
+        if status is None and not _is_standard(triple.object):
             occurrences.append(ConstructOccurrence("unknown_namespace", triple.subject, (triple.id,)))
     for occurrence in sorted(set(occurrences), key=lambda item: item.id):
         base = _base_record(occurrence, triples, inventory.source_file)
@@ -88,8 +93,15 @@ def audit_inventory(
         elif matching_rules[0]["action"] == "configure":
             finding.update(status="configured", generation_impact="blocks_generation", mapping_rule=matching_rules[0]["id"], decision_needed=matching_rules[0]["decision_needed"])
         else:
-            if mapping.get("format_version") == "2.0":
+            if mapping.get("format_version") == "2.0" and _generation_mapping_covers(occurrence, matching_rules[0], triples):
                 finding.update(status="mapped", generation_impact="included", mapping_rule=matching_rules[0]["id"])
+            elif mapping.get("format_version") == "2.0":
+                finding.update(
+                    status="blocked",
+                    generation_impact="blocks_generation",
+                    mapping_rule=matching_rules[0]["id"],
+                    decision_needed="Add an explicit generation mapping for this RDF assertion.",
+                )
             else:
                 finding.update(
                     status="configured",
@@ -130,10 +142,50 @@ def _base_record(occurrence: ConstructOccurrence, triples: dict[str, object], so
     return record
 
 
-def _is_local_or_standard(resource: RdfTerm, inventory: Inventory, mapping: dict[str, object]) -> bool:
-    if _in_scope(resource, inventory, mapping):
-        return True
+def _is_local(resource: RdfTerm, inventory: Inventory, mapping: dict[str, object]) -> bool:
+    return _in_scope(resource, inventory, mapping)
+
+
+def _is_standard(resource: RdfTerm) -> bool:
     return resource.value.startswith((RDF, RDFS, OWL, SKOS, XSD))
+
+
+def _configured_external_reference(uri: str, mapping: dict[str, object]) -> bool:
+    return mapping.get("format_version") == "2.0" and any(item["uri"] == uri for item in mapping.get("external_references", []))
+
+
+def _standard_reference_predicate(predicate: str) -> bool:
+    return predicate in {
+        f"{RDFS}subClassOf", f"{RDFS}subPropertyOf", f"{RDFS}domain", f"{RDFS}range",
+        f"{OWL}equivalentClass", f"{OWL}equivalentProperty", f"{OWL}inverseOf",
+    }
+
+
+def _generation_mapping_covers(
+    occurrence: ConstructOccurrence, rule: dict[str, object], triples: dict[str, object]
+) -> bool:
+    """A resource rule is not enough: each supported assertion needs an XML mapping."""
+    target = rule.get("target", {})
+    construct = occurrence.construct
+    if construct in {"rdfs_class", "owl_class"}:
+        return target.get("entity_kind") == "class"
+    if construct in {"rdf_property", "object_property", "datatype_property"}:
+        kinds = {"rdf_property": "rdf", "object_property": "object", "datatype_property": "datatype"}
+        return target.get("entity_kind") == "property" and target.get("property_kind") == kinds[construct]
+    if not occurrence.triple_ids:
+        return False
+    predicate = triples[occurrence.triple_ids[0]].predicate.value
+    if construct == "label":
+        return predicate in target.get("label_predicates", [])
+    if construct in {"comment", "scope_note", "example"}:
+        return any(predicate in field.get("predicates", []) for field in target.get("text_fields", []))
+    if construct in {"subclass_of", "subproperty_of", "equivalent_class", "equivalent_property", "inverse_of"}:
+        return any(predicate == relation.get("predicate") and RELATION_FIELDS[predicate] == relation.get("field") for relation in target.get("relations", []))
+    if construct == "named_domain":
+        return predicate == target.get("domain_range", {}).get("domain_predicate")
+    if construct == "named_range":
+        return predicate == target.get("domain_range", {}).get("range_predicate")
+    return False
 
 
 def _registered_namespace_status(uri: str, namespace_registry: dict[str, object] | None) -> str | None:
@@ -169,7 +221,7 @@ def _serialize_term(term: RdfTerm) -> str:
 
 
 def _external_reference_groups(inventory: Inventory, findings: tuple[dict[str, object], ...]) -> list[tuple[str, int]]:
-    finding_ids = {triple_id for finding in findings for triple_id in finding["triple_ids"] if finding["construct"] in {"unknown_namespace", "forbidden_namespace"}}
+    finding_ids = {triple_id for finding in findings for triple_id in finding["triple_ids"] if finding["construct"] in {"unknown_namespace", "forbidden_namespace", "missing_external_reference"}}
     counts: Counter[str] = Counter()
     for triple in inventory.triples:
         if triple.id not in finding_ids or triple.object.kind != "uri":

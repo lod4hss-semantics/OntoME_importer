@@ -23,6 +23,8 @@ L'outil sait :
 - produire un XML déterministe, une trace de provenance et des rapports ;
 - vérifier le XML contre le XSD OntoME fourni avec l'outil.
 
+La liste précise des assertions RDF/RDFS/OWL/SKOS acceptées et de celles qui bloquent est définie dans la [Semantic Policy](semantic-policy.md). L'outil ne fait aucune inférence OWL ou RDFS.
+
 L'outil ne sait pas :
 
 - deviner quelle classe RDF doit devenir quelle entité OntoME ;

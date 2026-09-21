@@ -14,6 +14,7 @@ import yaml
 from jsonschema import Draft202012Validator, FormatChecker
 
 from ontome_importer.audit import audit_inventory
+from ontome_importer.constructs import RDF, RDFS, OWL, SKOS, XSD
 from ontome_importer.inventory import Inventory
 from ontome_importer.package_resources import package_resource_path
 from ontome_importer.profiles import GenerationProfiles, ProfileError, validate_generation_mapping
@@ -107,7 +108,7 @@ def export_workbook(
     for triple in inventory.triples:
         triples_by_subject.setdefault(triple.subject, []).append(triple)
     for resource in inventory.resources:
-        if resource.id.kind != "uri" or not _in_scope(resource.id.value, profiles.mapping):
+        if resource.id.kind != "uri" or not _in_scope(resource.id.value, profiles.mapping, inventory):
             continue
         outgoing = triples_by_subject.get(resource.id, [])
         labels = [triple.object.value for triple in outgoing if triple.object.kind == "literal"]
@@ -394,8 +395,15 @@ def _sheet_rows(sheet: object, columns: tuple[str, ...]):
 
 
 def _external_uris(inventory: Inventory, mapping: dict[str, object]) -> list[str]:
-    standard = ("http://www.w3.org/", "https://www.w3.org/")
-    return sorted({triple.object.value for triple in inventory.triples if triple.object.kind == "uri" and not _in_scope(triple.object.value, mapping) and not triple.object.value.startswith(standard)})
+    standard_reference_predicates = {
+        f"{RDFS}subClassOf", f"{RDFS}subPropertyOf", f"{RDFS}domain", f"{RDFS}range",
+        f"{OWL}equivalentClass", f"{OWL}equivalentProperty", f"{OWL}inverseOf",
+    }
+    return sorted({
+        triple.object.value for triple in inventory.triples
+        if triple.object.kind == "uri" and not _in_scope(triple.object.value, mapping, inventory)
+        and (not triple.object.value.startswith((RDF, RDFS, OWL, SKOS, XSD)) or triple.predicate.value in standard_reference_predicates)
+    })
 
 
 def _external_uses(inventory: Inventory, mapping: dict[str, object]) -> dict[str, dict[str, set[str] | list[str]]]:
@@ -450,8 +458,18 @@ def _uri_prefix(uri: str) -> str:
     return uri.rsplit("#", 1)[0] + "#" if "#" in uri else uri.rsplit("/", 1)[0] + "/"
 
 
-def _in_scope(uri: str, mapping: dict[str, object]) -> bool:
-    return any(uri.startswith(str(selector["uri_prefix"])) for selector in mapping["scope"]["resource_selectors"] if "uri_prefix" in selector)
+def _in_scope(uri: str, mapping: dict[str, object], inventory: Inventory) -> bool:
+    for selector in mapping["scope"]["resource_selectors"]:
+        if "uri" in selector and uri != selector["uri"]:
+            continue
+        if "uri_prefix" in selector and not uri.startswith(str(selector["uri_prefix"])):
+            continue
+        if "rdf_type" in selector:
+            resource = next((item for item in inventory.resources if item.id.kind == "uri" and item.id.value == uri), None)
+            if resource is None or not any(term.value == selector["rdf_type"] for term in resource.types):
+                continue
+        return True
+    return False
 
 
 def _hash_json(value: object) -> str:

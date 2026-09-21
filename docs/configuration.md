@@ -51,3 +51,5 @@ external_references:
 ```
 
 The namespace must exist in the registry. `active` and explicitly configured `deprecated` namespaces are allowed; `forbidden` namespaces block generation and validation.
+
+This rule also applies to RDF/RDFS/OWL/SKOS/XSD terms used as a domain, range or relation target. Add their exact URI, OntoME namespace ID and OntoME identifier to `external_references`; the importer contains no built-in datatype or vocabulary mapping.

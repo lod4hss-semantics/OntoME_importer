@@ -1,12 +1,15 @@
 import json
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
+import yaml
 from jsonschema import Draft202012Validator
 
 from ontome_importer.audit import audit_inventory
+from ontome_importer.constructs import RDFS, SEMANTIC_CONSTRUCTS
 from ontome_importer.loader import load_inventory
-from ontome_importer.profiles import ProfileError, load_audit_profiles, verify_capability_xsd
+from ontome_importer.profiles import ProfileError, load_audit_profiles, load_generation_profiles, validate_generation_mapping, verify_capability_xsd
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -123,3 +126,81 @@ def test_ambiguous_mapping_is_invalid():
     mapping["rules"] = [*mapping["rules"], {"id": "also-map", "selector": {"uri_prefix": "https://example.org/source/"}, "action": "map", "target": {"representation": "generic"}}]
     report = audit_inventory(load_inventory(FIXTURES / "rdf/constructs.ttl", "turtle"), profiles.capability, mapping)
     assert {finding["status"] for finding in report.findings} == {"invalid"}
+
+
+def test_supported_assertion_without_xml_mapping_blocks_generation(tmp_path):
+    source = tmp_path / "definition.ttl"
+    source.write_text(
+        """@prefix ex: <https://example.org/source/> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+ex:Class a owl:Class ; rdfs:label "Class"@en ; rdfs:isDefinedBy ex:Definition .
+""",
+        encoding="utf-8",
+    )
+    profiles = load_audit_profiles(FIXTURES / "import-manifest.yaml")
+    capability = {**profiles.capability, "constructs": {**profiles.capability["constructs"], "definition_link": "supported"}}
+    mapping = {
+        "format_version": "2.0",
+        "scope": {"resource_selectors": [{"uri_prefix": "https://example.org/source/"}]},
+        "external_references": [],
+        "rules": [{
+            "id": "class", "selector": {"rdf_type": "http://www.w3.org/2002/07/owl#Class"}, "action": "map",
+            "target": {"entity_kind": "class", "identifier_in_namespace": {"source": "uri_suffix", "strip_prefix": "https://example.org/source/"}, "label_predicates": [f"{RDFS}label"]},
+        }],
+    }
+    report = audit_inventory(load_inventory(source, "turtle"), capability, mapping, {"format_version": "1.0", "namespaces": []})
+    finding = next(item for item in report.findings if item["construct"] == "definition_link")
+    assert finding["status"] == "blocked"
+    assert "explicit generation mapping" in finding["decision_needed"]
+
+
+def test_standard_range_requires_an_exact_configured_reference(tmp_path):
+    source = tmp_path / "xsd-range.ttl"
+    source.write_text(
+        """@prefix ex: <https://example.org/source/> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+ex:Property a owl:DatatypeProperty ; rdfs:label "Property"@en ; rdfs:domain ex:Class ; rdfs:range xsd:string .
+ex:Class a owl:Class ; rdfs:label "Class"@en .
+""",
+        encoding="utf-8",
+    )
+    profiles = load_audit_profiles(FIXTURES / "import-manifest.yaml")
+    report = audit_inventory(load_inventory(source, "turtle"), profiles.capability, profiles.mapping, profiles.namespace_registry)
+    missing = [item for item in report.findings if item["construct"] == "missing_external_reference"]
+    assert any("XMLSchema#string" in item["example"] for item in missing)
+
+    mapping = {
+        "format_version": "2.0",
+        "scope": {"resource_selectors": [{"uri_prefix": "https://example.org/source/"}]},
+        "rules": [],
+        "external_references": [{"uri": "http://www.w3.org/2001/XMLSchema#string", "reference_namespace": 42, "identifier": "String"}],
+    }
+    registry = {"format_version": "1.0", "namespaces": [{"uri": "http://www.w3.org/2001/XMLSchema#", "ontome_namespace_id": 42, "status": "active", "source": "test"}]}
+    configured = audit_inventory(load_inventory(source, "turtle"), profiles.capability, mapping, registry)
+    assert not any(item["construct"] == "missing_external_reference" for item in configured.findings)
+
+
+def test_rdf_list_components_are_reported_instead_of_ignored():
+    profiles = load_audit_profiles(FIXTURES / "import-manifest.yaml")
+    report = audit_inventory(load_inventory(FIXTURES / "rdf/constructs.ttl", "turtle"), profiles.capability, profiles.mapping, profiles.namespace_registry)
+    assert any(item["construct"] == "rdf_list_structure" and item["status"] == "blocked" for item in report.findings)
+
+
+def test_relation_predicate_cannot_target_a_different_xml_field():
+    profiles = load_generation_profiles(ROOT / "fixtures/phase4/import-manifest.yaml")
+    mapping = deepcopy(profiles.mapping)
+    mapping["rules"][0]["target"]["relations"][0]["field"] = "equivalentClass"
+    with pytest.raises(ProfileError, match="predicate-to-XML"):
+        validate_generation_mapping(mapping, profiles.capability)
+
+
+def test_semantic_constructs_are_declared_by_the_bundled_audit_capability():
+    audit = yaml.safe_load((ROOT / "src/ontome_importer/templates/audit/capability-1.1.yaml").read_text())
+    generation = yaml.safe_load((ROOT / "src/ontome_importer/templates/generation/capability-1.0.yaml").read_text())
+    published = yaml.safe_load((ROOT / "profiles/capabilities/ontome-import-2026-09-15.yaml").read_text())
+    assert set(audit["constructs"]) == SEMANTIC_CONSTRUCTS
+    assert set(generation["constructs"]) == SEMANTIC_CONSTRUCTS
+    assert set(published["constructs"]) == SEMANTIC_CONSTRUCTS

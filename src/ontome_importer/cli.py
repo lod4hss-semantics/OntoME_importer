@@ -131,6 +131,7 @@ def _run_audit(args: argparse.Namespace) -> int:
             "audit.json": report.to_json().encode("utf-8"),
             "audit.md": report.to_markdown().encode("utf-8"),
         })
+        print(f"ontome-importer audit: {'ready for generation' if report.to_dict()['strict_ok'] else 'decisions required'}; reports written to {args.output_dir}")
         return 0
     except (AssistantError, ProfileError, RdfLoadError, OSError) as error:
         print(f"ontome-importer audit: {error}", file=sys.stderr)
@@ -163,6 +164,7 @@ def _run_generate(args: argparse.Namespace) -> int:
         })
         if args.workbook:
             annotate_workbook(Path(args.workbook), profiles, inventory, _generation_issues(result.audit, inventory))
+        print(f"ontome-importer generate: XML and reports written to {output_dir}")
         return 0
     except XmlGenerationError as error:
         print(f"ontome-importer generate: {error}", file=sys.stderr)

@@ -6,7 +6,8 @@ import yaml
 
 from ontome_importer.cli import main
 from ontome_importer.loader import load_inventory
-from ontome_importer.mapping_assistant import AssistantError, _catalog_identifiers
+from ontome_importer.mapping_assistant import AssistantError, _catalog_identifiers, _external_uris
+from ontome_importer.profiles import load_generation_profiles
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -126,3 +127,11 @@ def test_catalog_identifiers_require_one_literal_per_uri(tmp_path):
     )
     with pytest.raises(AssistantError, match="ambiguous"):
         _catalog_identifiers(load_inventory(catalog, "ntriples"), predicate)
+
+
+def test_external_reference_list_respects_rdf_type_scope_selectors():
+    profiles = load_generation_profiles(MANIFEST)
+    inventory = load_inventory(ROOT / "fixtures/phase4/rdf/valid.ttl", "turtle")
+    mapping = dict(profiles.mapping)
+    mapping["scope"] = {"resource_selectors": [{"rdf_type": "http://www.w3.org/2002/07/owl#Class"}]}
+    assert "https://example.org/source/Parent" not in _external_uris(inventory, mapping)

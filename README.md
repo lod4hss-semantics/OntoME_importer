@@ -26,6 +26,7 @@ pytest
 ```
 
 The operational documentation is the [User Guide](docs/user-guide.md). Versioned configuration details are in the [Configuration Guide](docs/configuration.md).
+The supported RDF/RDFS/OWL/SKOS subset is defined in the [Semantic Policy](docs/semantic-policy.md).
 
 ## CLI
 
