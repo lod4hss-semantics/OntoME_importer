@@ -46,6 +46,7 @@ RELATION_FIELDS = {
     f"{RDFS}subPropertyOf": "subPropertyOf",
     f"{OWL}equivalentClass": "equivalentClass",
     f"{OWL}equivalentProperty": "equivalentProperty",
+    f"{OWL}disjointWith": "disjointWith",
     f"{OWL}inverseOf": "inverseOf",
 }
 

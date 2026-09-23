@@ -5,8 +5,8 @@ xsd:
   sha256: d7d41c320feddace63f67fe664cb7f869b30230915cd3faee5bc92aacf7ab1a9
 xml:
   root: namespace
-  class_fields: [identifierInNamespace, identifierInURI, standardLabel, subClassOf, parentClassOf, equivalentClass, disjointWith, textProperties]
-  property_fields: [identifierInNamespace, identifierInURI, label, subPropertyOf, parentPropertyOf, equivalentProperty, inverseOf, hasDomain, hasRange, domainInstancesMinQuantifier, domainInstancesMaxQuantifier, rangeInstancesMinQuantifier, rangeInstancesMaxQuantifier, textProperties]
+  class_fields: [identifierInNamespace, identifierInURI, standardLabel, subClassOf, equivalentClass, disjointWith, textProperties]
+  property_fields: [identifierInNamespace, identifierInURI, label, subPropertyOf, equivalentProperty, inverseOf, hasDomain, hasRange, textProperties]
 constructs:
   rdfs_class: supported
   owl_class: supported
@@ -31,7 +31,7 @@ constructs:
   property_chain: blocked
   restriction: blocked
   cardinality: blocked
-  disjointness: blocked
+  disjointness: supported
   property_characteristic: blocked
   rdf_list_structure: blocked
   restriction_property: blocked

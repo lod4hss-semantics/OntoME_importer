@@ -1,4 +1,4 @@
-format_version: "2.0"
+format_version: "7.0"
 scope:
   resource_selectors:
     - uri_prefix: https://example.org/source/
@@ -12,6 +12,9 @@ external_references:
   - uri: https://example.org/external/ExternalDatatype
     reference_namespace: 100
     identifier: D1
+external_reference_rules: []
+editorial_exceptions: []
+decisions: []
 rules:
   - id: map-class
     selector:

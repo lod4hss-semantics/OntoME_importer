@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lod4hss.org/ontome-importer/schemas/decision-journal-1.0.json",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["id", "resource_uri", "construct", "action", "status", "rationale", "approved_by", "approved_at", "decision_reference"],
+    "properties": {
+      "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"},
+      "resource_uri": {"type": "string", "format": "uri"},
+      "construct": {"type": "string", "minLength": 1},
+      "action": {"enum": ["map", "transform", "reference", "exclude", "editorial_exception"]},
+      "status": {"enum": ["proposed", "approved", "rejected"]},
+      "rationale": {"type": "string", "minLength": 1},
+      "approved_by": {"type": "string", "minLength": 1},
+      "approved_at": {"type": "string", "format": "date"},
+      "decision_reference": {"type": "string", "minLength": 1},
+      "mapping_rule": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"},
+      "exception_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"}
+    }
+  }
+}

@@ -115,7 +115,7 @@ def test_audit_json_matches_its_schema_and_is_deterministic():
     inventory = load_inventory(FIXTURES / "rdf/constructs.ttl", "turtle")
     first = audit_inventory(inventory, profiles.capability, profiles.mapping, profiles.namespace_registry)
     second = audit_inventory(inventory, profiles.capability, profiles.mapping, profiles.namespace_registry)
-    schema = json.loads((ROOT / "schemas/reports/audit-1.0.schema.json").read_text())
+    schema = json.loads((ROOT / "schemas/reports/audit-1.1.schema.json").read_text())
     assert list(Draft202012Validator(schema).iter_errors(first.to_dict())) == []
     assert first.to_json() == second.to_json()
 
@@ -141,9 +141,12 @@ ex:Class a owl:Class ; rdfs:label "Class"@en ; rdfs:isDefinedBy ex:Definition .
     profiles = load_audit_profiles(FIXTURES / "import-manifest.yaml")
     capability = {**profiles.capability, "constructs": {**profiles.capability["constructs"], "definition_link": "supported"}}
     mapping = {
-        "format_version": "2.0",
+        "format_version": "7.0",
         "scope": {"resource_selectors": [{"uri_prefix": "https://example.org/source/"}]},
         "external_references": [],
+        "external_reference_rules": [],
+        "editorial_exceptions": [],
+        "decisions": [],
         "rules": [{
             "id": "class", "selector": {"rdf_type": "http://www.w3.org/2002/07/owl#Class"}, "action": "map",
             "target": {"entity_kind": "class", "identifier_in_namespace": {"source": "uri_suffix", "strip_prefix": "https://example.org/source/"}, "label_predicates": [f"{RDFS}label"]},
@@ -173,14 +176,53 @@ ex:Class a owl:Class ; rdfs:label "Class"@en .
     assert any("XMLSchema#string" in item["example"] for item in missing)
 
     mapping = {
-        "format_version": "2.0",
+        "format_version": "7.0",
         "scope": {"resource_selectors": [{"uri_prefix": "https://example.org/source/"}]},
         "rules": [],
         "external_references": [{"uri": "http://www.w3.org/2001/XMLSchema#string", "reference_namespace": 42, "identifier": "String"}],
+        "external_reference_rules": [],
+        "editorial_exceptions": [],
+        "decisions": [],
     }
     registry = {"format_version": "1.0", "namespaces": [{"uri": "http://www.w3.org/2001/XMLSchema#", "ontome_namespace_id": 42, "status": "active", "source": "test"}]}
     configured = audit_inventory(load_inventory(source, "turtle"), profiles.capability, mapping, registry)
     assert not any(item["construct"] == "missing_external_reference" for item in configured.findings)
+
+
+def test_audit_links_a_matching_approved_decision_to_its_finding(tmp_path):
+    source = tmp_path / "definition.ttl"
+    source.write_text(
+        """@prefix ex: <https://example.org/source/> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+ex:Class a owl:Class ; rdfs:label "Class"@en .
+""",
+        encoding="utf-8",
+    )
+    profiles = load_audit_profiles(FIXTURES / "import-manifest.yaml")
+    mapping = {**profiles.mapping, "decisions": [{"id": "class-label", "resource_uri": "https://example.org/source/Class", "construct": "label", "action": "map", "status": "approved", "rationale": "Approved label import.", "approved_by": "Editor", "approved_at": "2026-09-23", "decision_reference": "decision-1"}]}
+    report = audit_inventory(load_inventory(source, "turtle"), profiles.capability, mapping, profiles.namespace_registry)
+    finding = next(item for item in report.findings if item["construct"] == "label")
+    assert finding["decision_id"] == "class-label"
+    assert finding["decision_status"] == "approved"
+
+
+def test_unapproved_decision_blocks_the_finding_it_governs(tmp_path):
+    source = tmp_path / "definition.ttl"
+    source.write_text(
+        """@prefix ex: <https://example.org/source/> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+ex:Class a owl:Class ; rdfs:label "Class"@en .
+""",
+        encoding="utf-8",
+    )
+    profiles = load_audit_profiles(FIXTURES / "import-manifest.yaml")
+    mapping = {**profiles.mapping, "decisions": [{"id": "class-label", "resource_uri": "https://example.org/source/Class", "construct": "label", "action": "map", "status": "proposed", "rationale": "Awaiting approval.", "approved_by": "Editor", "approved_at": "2026-09-23", "decision_reference": "decision-1"}]}
+    report = audit_inventory(load_inventory(source, "turtle"), profiles.capability, mapping, profiles.namespace_registry)
+    finding = next(item for item in report.findings if item["construct"] == "label")
+    assert finding["status"] == "configured"
+    assert finding["generation_impact"] == "blocks_generation"
 
 
 def test_rdf_list_components_are_reported_instead_of_ignored():
@@ -204,3 +246,25 @@ def test_semantic_constructs_are_declared_by_the_bundled_audit_capability():
     assert set(audit["constructs"]) == SEMANTIC_CONSTRUCTS
     assert set(generation["constructs"]) == SEMANTIC_CONSTRUCTS
     assert set(published["constructs"]) == SEMANTIC_CONSTRUCTS
+
+
+def test_generation_capability_rejects_fields_without_writer_support():
+    profiles = load_generation_profiles(ROOT / "fixtures/phase4/import-manifest.yaml")
+    capability = deepcopy(profiles.capability)
+    capability["xml"] = {**capability["xml"], "class_fields": [*capability["xml"]["class_fields"], "parentClassOf"]}
+    with pytest.raises(ProfileError, match="not supported by the XML writer"):
+        validate_generation_mapping(profiles.mapping, capability)
+
+
+def test_audit_categories_distinguish_profile_external_and_unsupported_blockers():
+    profiles = load_audit_profiles(FIXTURES / "import-manifest.yaml")
+    report = audit_inventory(
+        load_inventory(FIXTURES / "rdf/constructs.ttl", "turtle"),
+        profiles.capability,
+        profiles.mapping,
+        profiles.namespace_registry,
+    )
+    categories = {finding["construct"]: finding["category"] for finding in report.findings}
+    assert categories["anonymous_class"] == "unsupported_rdf_construct"
+    assert categories["unknown_namespace"] == "missing_external_data"
+    assert categories["owl_class"] == "configuration_required"

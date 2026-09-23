@@ -66,4 +66,4 @@ def test_audit_creates_a_mapping_workbook_for_a_workspace(tmp_path):
         "--output-dir", str(workspace / "build/audit"), "--workbook", str(workbook),
     ]) == 0
     document = load_workbook(workbook, read_only=True)
-    assert {"SUMMARY", "CLASSES", "PROPERTIES", "EXTERNAL_REFERENCES", "METADATA", "BLOCKERS", "VALIDATION"} <= set(document.sheetnames)
+    assert {"SUMMARY", "RULES", "EXTERNAL_REFERENCE_RULES", "EXTERNAL_EXCEPTIONS", "NAMESPACE_REGISTRY", "CLASSES", "PROPERTIES", "EXTERNAL_USAGE", "METADATA", "BLOCKERS", "VALIDATION"} <= set(document.sheetnames)

@@ -46,7 +46,7 @@ def main() -> None:
     phase4 = ROOT / "fixtures/phase4"
     _validate(ROOT / "schemas/config/import-manifest.schema.json", phase4 / "import-manifest.yaml")
     _validate(ROOT / "schemas/config/capability-profile.schema.json", phase4 / "profiles/capability.yaml")
-    _validate(ROOT / "schemas/config/mapping-profile-2.0.schema.json", phase4 / "profiles/mapping.yaml")
+    _validate(ROOT / "schemas/config/mapping-profile-7.0.schema.json", phase4 / "profiles/mapping.yaml")
     _validate(ROOT / "schemas/config/namespace-registry.schema.json", phase4 / "profiles/namespace-registry.yaml")
 
     templates = ROOT / "src/ontome_importer/templates"

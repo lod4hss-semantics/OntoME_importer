@@ -1,4 +1,5 @@
 from pathlib import Path
+import shutil
 
 from openpyxl import load_workbook
 import pytest
@@ -29,6 +30,8 @@ def test_assistant_round_trips_existing_generation_profiles(tmp_path):
     original_mapping = yaml.safe_load((ROOT / "fixtures/phase4/profiles/mapping.yaml").read_text())
     assert yaml.safe_load(mapping.read_text()) == original_mapping
     assert yaml.safe_load(registry.read_text()) == yaml.safe_load((ROOT / "fixtures/phase4/profiles/namespace-registry.yaml").read_text())
+    assert tuple(cell.value for cell in load_workbook(workbook)["EXTERNAL_REFERENCE_RULES"][1]) == ("id", "uri_prefix", "reference_namespace", "identifier_source", "identifier_pattern")
+    assert tuple(cell.value for cell in load_workbook(workbook)["DECISIONS"][1]) == ("id", "resource_uri", "construct", "action", "status", "rationale", "approved_by", "approved_at", "decision_reference", "mapping_rule", "exception_id")
 
 
 def test_assistant_rejects_a_stale_workbook(tmp_path, capsys):
@@ -40,6 +43,25 @@ def test_assistant_rejects_a_stale_workbook(tmp_path, capsys):
     document.save(workbook)
     assert main(["assist", "check", "--manifest", str(MANIFEST), "--workbook", str(workbook), "--output", str(tmp_path / "check.json")]) == 3
     assert "source checksum" not in capsys.readouterr().err
+
+
+def test_assistant_round_trips_generic_external_reference_rules(tmp_path):
+    workspace = tmp_path / "workspace"
+    shutil.copytree(ROOT / "fixtures/phase4", workspace)
+    profile = workspace / "profiles/mapping.yaml"
+    mapping = yaml.safe_load(profile.read_text())
+    mapping["external_references"] = []
+    mapping["external_reference_rules"] = [{"id": "external-suffix", "uri_prefix": "https://example.org/external/", "reference_namespace": 100, "identifier_extraction": {"source": "uri_suffix"}}]
+    profile.write_text(yaml.safe_dump(mapping, sort_keys=False), encoding="utf-8")
+    workbook = tmp_path / "mapping.xlsx"
+    output = tmp_path / "mapping.yaml"
+    assert main(["assist", "export", "--manifest", str(workspace / "import-manifest.yaml"), "--output", str(workbook)]) == 0
+    document = load_workbook(workbook)
+    assert document["EXTERNAL_EXCEPTIONS"].max_row == 1
+    assert {row[4] for row in document["EXTERNAL_USAGE"].iter_rows(min_row=2, values_only=True)} == {"resolved"}
+    assert {row[5] for row in document["EXTERNAL_USAGE"].iter_rows(min_row=2, values_only=True)} == {"rule"}
+    assert main(["assist", "compile", "--manifest", str(workspace / "import-manifest.yaml"), "--workbook", str(workbook), "--mapping-output", str(output), "--registry-output", str(tmp_path / "registry.yaml"), "--report-output", str(tmp_path / "report.json")]) == 0
+    assert yaml.safe_load(output.read_text()) == mapping
 
 
 def test_check_is_read_only_and_refresh_writes_derived_validation(tmp_path):
@@ -69,7 +91,7 @@ def test_compile_preserves_unreferenced_namespace_rows(tmp_path):
     workbook = tmp_path / "mapping.xlsx"
     assert main(["assist", "export", "--manifest", str(MANIFEST), "--output", str(workbook)]) == 0
     document = load_workbook(workbook)
-    document["_external_namespaces"].append(("https://example.org/reserved/", 999, "forbidden", "test", ""))
+    document["NAMESPACE_REGISTRY"].append(("https://example.org/reserved/", 999, "forbidden", "test", ""))
     document.save(workbook)
     registry = tmp_path / "registry.yaml"
     assert main([
@@ -85,7 +107,7 @@ def test_compile_rejects_invalid_rule_json_before_publishing(tmp_path):
     mapping.write_text("original\n", encoding="utf-8")
     assert main(["assist", "export", "--manifest", str(MANIFEST), "--output", str(workbook)]) == 0
     document = load_workbook(workbook)
-    document["RULES"]["K2"] = "{not-json}"
+    document["RULES"]["N2"] = "{not-json}"
     document.save(workbook)
     assert main([
         "assist", "compile", "--manifest", str(MANIFEST), "--workbook", str(workbook),

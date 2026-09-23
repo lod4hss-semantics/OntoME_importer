@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lod4hss.org/ontome-importer/schemas/generation-audit-1.1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format_version", "source", "xsd", "strict_ok", "findings", "counts"],
+  "properties": {
+    "format_version": {"const": "1.1"},
+    "source": {"type": "object", "required": ["file", "sha256"], "properties": {"file": {"type": "string"}, "sha256": {"type": "string"}}, "additionalProperties": false},
+    "xsd": {"type": "object", "required": ["version", "sha256"], "properties": {"version": {"type": "string"}, "sha256": {"type": "string"}}, "additionalProperties": false},
+    "strict_ok": {"type": "boolean"},
+    "findings": {"type": "array", "items": {"type": "object", "required": ["status", "category"], "properties": {"status": {"enum": ["mapped", "resolved", "configured", "excluded", "blocked", "invalid"]}, "category": {"enum": ["mechanical_transformation", "intentional_exclusion", "configuration_required", "missing_profile_rule", "missing_external_data", "forbidden_external_namespace", "ambiguous_source_data", "incomplete_source_data", "invalid_source_data", "unsupported_rdf_construct", "invalid_profile"]}}}},
+    "counts": {"type": "object", "additionalProperties": {"type": "integer"}}
+  }
+}

@@ -10,7 +10,6 @@ xml:
     - identifierInURI
     - standardLabel
     - subClassOf
-    - parentClassOf
     - equivalentClass
     - disjointWith
     - textProperties
@@ -19,15 +18,10 @@ xml:
     - identifierInURI
     - label
     - subPropertyOf
-    - parentPropertyOf
     - equivalentProperty
     - inverseOf
     - hasDomain
     - hasRange
-    - domainInstancesMinQuantifier
-    - domainInstancesMaxQuantifier
-    - rangeInstancesMinQuantifier
-    - rangeInstancesMaxQuantifier
     - textProperties
 constructs:
   rdfs_class: supported
@@ -53,7 +47,7 @@ constructs:
   property_chain: blocked
   restriction: blocked
   cardinality: blocked
-  disjointness: blocked
+  disjointness: supported
   property_characteristic: blocked
   rdf_list_structure: blocked
   restriction_property: blocked

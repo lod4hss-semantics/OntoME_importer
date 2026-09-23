@@ -10,6 +10,7 @@ from jsonschema import Draft202012Validator
 from lxml import etree
 
 from ontome_importer.inventory import Inventory
+from ontome_importer.external_references import ExternalReferenceError, resolve_external_reference
 from ontome_importer.loader import load_inventory
 from ontome_importer.package_resources import package_resource_path
 from ontome_importer.profiles import ProfileError, load_generation_profiles, verify_capability_xsd, verify_source_checksum
@@ -43,8 +44,8 @@ def validate_generation(manifest_path: Path, xml_path: Path, trace_path: Path, a
     xml_bytes = _read_bytes(xml_path, "xml_artifact", check)
     trace = _read_json(trace_path, "trace_json", check)
     audit = _read_json(audit_path, "audit_json", check)
-    trace_valid = _validate_json_schema(trace, "schemas/reports/generation-trace-1.1.schema.json", "trace_schema", check)
-    audit_valid = _validate_json_schema(audit, "schemas/reports/generation-audit-1.0.schema.json", "audit_schema", check)
+    trace_valid = _validate_json_schema(trace, "schemas/reports/generation-trace-1.2.schema.json", "trace_schema", check)
+    audit_valid = _validate_json_schema(audit, "schemas/reports/generation-audit-1.1.schema.json", "audit_schema", check)
     xml_document = _parse_xml(xml_bytes, check)
     try:
         schema = etree.XMLSchema(etree.parse(str(xsd_path)))
@@ -210,6 +211,22 @@ def _check_trace(trace: dict[str, object], document: etree._Element, inventory: 
         check(f"trace_source_triples:{entry['id']}", sources_valid, "Trace names an unknown source triple.")
         if entry["origin"] == "configuration":
             check(f"trace_origin:{entry['id']}", entry["mapping_rule"] == "manifest" and not entry["source_triples"], "Configuration trace has RDF provenance.")
+        elif entry["origin"] in {"identifier_uri_suffix", "identifier_regex_capture"}:
+            check(f"trace_origin:{entry['id']}", not entry["source_triples"] and entry["mapping_rule"] in rules, "Identifier strategy trace has invalid provenance.")
+        elif entry["origin"] == "editorial_exception":
+            exception = next((item for item in mapping.get("editorial_exceptions", []) if item["id"] == entry.get("exception_id")), None)
+            resource = entry.get("source_resource")
+            expected_field = "hasDomain" if entry["element"] == "hasDomain" else "hasRange" if entry["element"] == "hasRange" else None
+            valid_exception = (
+                exception is not None
+                and exception["status"] == "approved"
+                and isinstance(resource, dict)
+                and resource.get("kind") == "uri"
+                and resource.get("value") == exception["resource_uri"]
+                and exception["field"] == expected_field
+                and _resource_in_inventory(resource, resources)
+            )
+            check(f"trace_origin:{entry['id']}", not entry["source_triples"] and entry["mapping_rule"] in rules and valid_exception, "Editorial exception trace has invalid provenance.")
         else:
             resource = entry.get("source_resource")
             valid_resource = isinstance(resource, dict) and _resource_in_inventory(resource, resources)
@@ -243,20 +260,37 @@ def _check_reference_namespaces(document: etree._Element, trace: dict[str, objec
         else:
             root_namespaces.add(namespace)
     registry_ids = {item["ontome_namespace_id"]: item for item in registry["namespaces"]}
-    external = {(item["reference_namespace"], item["identifier"]) for item in mapping["external_references"]}
+    trace_by_node: dict[etree._Element, dict[str, object]] = {}
+    for entry in trace["entries"]:
+        try:
+            matches = document.xpath(entry["xml_path"])
+        except etree.XPathEvalError:
+            matches = []
+        if len(matches) == 1 and isinstance(matches[0], etree._Element):
+            trace_by_node[matches[0]] = entry
     for node in document.xpath("//*[@referenceNamespace]"):
         namespace = _positive_integer(node.attrib["referenceNamespace"])
         if namespace is None:
             valid = False
             unresolved.append(f"{node.tag}:{node.text or ''}:{node.attrib['referenceNamespace']}")
             continue
-        key = (namespace, node.text or "")
-        if namespace not in root_namespaces or key not in external or namespace not in registry_ids or registry_ids[namespace]["status"] == "forbidden":
+        entry = trace_by_node.get(node)
+        source_resource = entry.get("source_resource") if entry else None
+        try:
+            if entry and entry.get("origin") == "editorial_exception":
+                exception = next((item for item in mapping.get("editorial_exceptions", []) if item["id"] == entry.get("exception_id")), None)
+                resolved = resolve_external_reference(exception["reference_uri"], mapping, registry) if exception else None
+            else:
+                resolved = resolve_external_reference(source_resource["value"], mapping, registry) if isinstance(source_resource, dict) else None
+        except (ExternalReferenceError, KeyError):
+            resolved = None
+        provenance_matches = entry and (entry.get("origin") == "editorial_exception" or (resolved is not None and resolved.origin == entry.get("origin") and resolved.rule_id == entry.get("reference_rule")))
+        if namespace not in root_namespaces or namespace not in registry_ids or registry_ids[namespace]["status"] == "forbidden" or resolved is None or resolved.reference_namespace != namespace or resolved.identifier != (node.text or "") or not provenance_matches:
             valid = False
             unresolved.append(f"{node.tag}:{node.text or ''}:{namespace}")
     check("external_references", valid, "External XML reference is absent, forbidden, or undeclared." if not valid else None)
     local_values = {value for value in document.xpath("/namespace/classes/class/identifierInNamespace/text() | /namespace/properties/property/identifierInNamespace/text()")}
-    local_nodes = document.xpath("//subClassOf[not(@referenceNamespace)] | //equivalentClass[not(@referenceNamespace)] | //subPropertyOf[not(@referenceNamespace)] | //equivalentProperty[not(@referenceNamespace)] | //inverseOf[not(@referenceNamespace)] | //hasDomain[not(@referenceNamespace)] | //hasRange[not(@referenceNamespace)]")
+    local_nodes = document.xpath("//subClassOf[not(@referenceNamespace)] | //equivalentClass[not(@referenceNamespace)] | //disjointWith[not(@referenceNamespace)] | //subPropertyOf[not(@referenceNamespace)] | //equivalentProperty[not(@referenceNamespace)] | //inverseOf[not(@referenceNamespace)] | //hasDomain[not(@referenceNamespace)] | //hasRange[not(@referenceNamespace)]")
     missing = [node.text for node in local_nodes if (node.text or "") not in local_values]
     unresolved.extend(f"local:{value}" for value in missing)
     check("local_references", not missing, "Local XML reference has no generated target." if missing else None)

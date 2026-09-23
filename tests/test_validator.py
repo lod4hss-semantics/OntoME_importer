@@ -1,8 +1,10 @@
 import json
 from pathlib import Path
+import shutil
 
 from jsonschema import Draft202012Validator
 from openpyxl import load_workbook
+import yaml
 
 from ontome_importer.cli import main
 from ontome_importer.validator import validate_generation
@@ -29,6 +31,34 @@ def test_validate_accepts_a_complete_generation_bundle(tmp_path):
     assert report["valid"] is True
     assert report["counts"]["failed"] == 0
     assert list(Draft202012Validator(schema).iter_errors(report)) == []
+
+
+def test_validate_accepts_a_bundle_with_generic_external_reference_rules(tmp_path):
+    workspace = tmp_path / "workspace"
+    shutil.copytree(FIXTURES, workspace)
+    mapping_path = workspace / "profiles/mapping.yaml"
+    mapping = yaml.safe_load(mapping_path.read_text())
+    mapping["external_references"] = []
+    mapping["external_reference_rules"] = [{"id": "external-suffix", "uri_prefix": "https://example.org/external/", "reference_namespace": 100, "identifier_extraction": {"source": "uri_suffix"}}]
+    mapping_path.write_text(yaml.safe_dump(mapping, sort_keys=False), encoding="utf-8")
+    bundle = tmp_path / "bundle"
+    assert main(["generate", "--manifest", str(workspace / "import-manifest.yaml"), "--output-dir", str(bundle)]) == 0
+    report = validate_generation(workspace / "import-manifest.yaml", bundle / "import.xml", bundle / "generation-trace.json", bundle / "generation-audit.json")
+    assert report["valid"] is True
+
+
+def test_validate_accepts_an_editorial_exception_with_an_external_reference(tmp_path):
+    workspace = tmp_path / "workspace"
+    shutil.copytree(FIXTURES, workspace)
+    mapping_path = workspace / "profiles/mapping.yaml"
+    mapping = yaml.safe_load(mapping_path.read_text())
+    mapping["editorial_exceptions"] = [{"id": "range", "resource_uri": "https://example.org/source/property", "field": "hasRange", "reference_uri": "https://example.org/external/ExternalClass", "status": "approved", "rationale": "Source omission.", "approved_by": "Editor", "approved_at": "2026-09-23", "decision_reference": "decision-1"}]
+    mapping_path.write_text(yaml.safe_dump(mapping, sort_keys=False), encoding="utf-8")
+    bundle = tmp_path / "bundle"
+    manifest = workspace / "import-manifest-missing-range.yaml"
+    assert main(["generate", "--manifest", str(manifest), "--output-dir", str(bundle)]) == 0
+    report = validate_generation(manifest, bundle / "import.xml", bundle / "generation-trace.json", bundle / "generation-audit.json")
+    assert report["valid"] is True
 
 
 def test_validate_cli_writes_a_report_and_rejects_tampered_xml(tmp_path):

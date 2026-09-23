@@ -191,7 +191,7 @@ Le fichier `README.md` de ce dossier répète les prochaines commandes avec les 
 | `capability-*.yaml` | Paramètres techniques fournis par l'outil pour le XSD OntoME. Vous ne les modifiez normalement pas au début. |
 | `namespace-registry.yaml` | Liste des namespaces OntoME externes à compléter seulement si votre RDF y fait référence. |
 | `mapping-audit.yaml` | Définit le périmètre du premier audit. |
-| `mapping-generation.yaml` | Fichier où l'équipe écrira les décisions d'import après l'audit. |
+| `mapping-generation.yaml` | Fichier compilé où l'équipe publie les décisions d'import après l'audit. |
 
 Le XSD OntoME est livré avec l'outil. Vous n'avez pas à chercher ou copier un fichier XSD.
 
@@ -206,6 +206,7 @@ Le mapping de génération est le fichier qui décrit votre logique métier. Il 
 - Quel commentaire ou scope note devient une note XML ?
 - Quelle relation RDF devient `subClassOf`, `inverseOf` ou `hasRange` ?
 - Quelle URI externe correspond à quel namespace OntoME et quel identifiant ?
+- Quelle décision approuvée justifie un mapping, une exclusion ou une exception éditoriale ?
 
 Vous ne devez pas répondre à ces questions avant le premier audit. Le rapport d'audit donne la liste exacte des éléments sur lesquels l'équipe doit se prononcer.
 
@@ -240,7 +241,7 @@ L'audit peut se terminer avec le code `0` tout en signalant des blocages. C'est 
 
 ### 2. Compléter le mapping
 
-Le classeur distingue les classes, propriétés, références externes, métadonnées et règles. Après les décisions de l'équipe, contrôlez-le puis compilez les YAML utilisés par la génération :
+Le classeur distingue les classes, propriétés, références externes, exceptions éditoriales, journal de décisions, métadonnées et règles. Modifiez seulement les feuilles indiquées par la page `SUMMARY`; les autres feuilles sont des diagnostics dérivés. Après les décisions de l'équipe, contrôlez-le puis compilez les YAML utilisés par la génération :
 
 ```bash
 ontome-importer assist check \
@@ -279,14 +280,16 @@ ontome-importer assist export \
   --output decisions/mapping-assistant.xlsx
 ```
 
-Sans catalogue, le classeur liste les références externes détectées et les décisions restent à compléter dans `EXTERNAL_REFERENCES`.
+Sans catalogue, le classeur liste les références externes détectées dans `EXTERNAL_USAGE`. Ajouter une règle dans `EXTERNAL_REFERENCE_RULES` lorsque l'identifiant est dérivable, ou une entrée dans `EXTERNAL_EXCEPTIONS` pour un cas exact.
 
 Pour chaque blocage en portée, décider de l'une des actions suivantes :
 
 - compléter le mapping pour une information qui doit être importée ;
 - corriger la source RDF si elle est incomplète ou contradictoire ;
 - exclure explicitement une information hors périmètre, avec une justification ;
-- déclarer précisément une référence externe si elle doit être conservée.
+- déclarer une règle ou une exception externe si la référence doit être conservée.
+
+Enregistrez aussi la décision dans `DECISIONS` avec son périmètre, sa justification, son approbateur, sa date et une référence durable. Une décision liée à une assertion qui serait générée doit être `approved`; sinon elle bloque la génération. `EDITORIAL_EXCEPTIONS` est réservé à un domaine ou range absent dans le RDF et exige les mêmes preuves d'approbation.
 
 Une génération ne peut pas continuer si une classe n'a pas de label avec langue, si une propriété n'a pas un domaine et un range uniques, ou si une référence externe n'est pas déclarée.
 
@@ -345,7 +348,8 @@ Pour qu'un import soit rejouable, conserver ensemble :
 
 - la source RDF ;
 - les deux manifests ;
-- les quatre profils ;
+- les cinq profils ;
+- le classeur de décisions ou, à défaut, son journal compilé dans le mapping ;
 - le XML généré ;
 - la trace de génération ;
 - les audits ;

@@ -39,7 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument("--generation-manifest", help="Generation manifest used to prefill an optional mapping workbook.")
     audit.add_argument("--workbook", help="New XLSX mapping workbook created with this audit.")
     generate = commands.add_parser("generate", help="Generate OntoME XML from resolved mappings.")
-    generate.add_argument("--manifest", required=True, help="Path to an import manifest 1.0 with mapping profile 2.0.")
+    generate.add_argument("--manifest", required=True, help="Path to an import manifest 1.0 with mapping profile 7.0.")
     generate.add_argument("--output-dir", required=True, help="Directory for generated XML and reports.")
     generate.add_argument("--workbook", help="Optional XLSX workbook to annotate with generation diagnostics.")
     validate = commands.add_parser("validate", help="Validate a generated OntoME XML import.")
@@ -69,7 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
     compile_ = assist_commands.add_parser("compile", help="Compile checked XLSX decisions into YAML profiles.")
     compile_.add_argument("--manifest", required=True, help="Path to a generation import manifest.")
     compile_.add_argument("--workbook", required=True, help="XLSX workbook path.")
-    compile_.add_argument("--mapping-output", required=True, help="Path for compiled mapping profile 2.0 YAML.")
+    compile_.add_argument("--mapping-output", required=True, help="Path for compiled mapping profile 7.0 YAML.")
     compile_.add_argument("--registry-output", required=True, help="Path for compiled namespace registry YAML.")
     compile_.add_argument("--report-output", required=True, help="Path for the JSON compile report.")
     return parser

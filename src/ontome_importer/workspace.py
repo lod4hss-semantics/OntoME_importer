@@ -146,10 +146,13 @@ scope:
 def _generation_mapping(scope_prefixes: list[str]) -> str:
     selectors = "".join(f"    - uri_prefix: {_yaml_string(prefix)}\n" for prefix in scope_prefixes)
     return f'''# TODO: add explicit class and property mapping rules after the audit.
-format_version: "2.0"
+format_version: "7.0"
 scope:
   resource_selectors:
 {selectors}external_references: []
+external_reference_rules: []
+editorial_exceptions: []
+decisions: []
 rules: []
 '''
 

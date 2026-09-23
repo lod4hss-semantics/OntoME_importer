@@ -1,10 +1,10 @@
 # Phase 0 Contracts
 
-Phase 0 freezes configuration and report contracts before implementation of RDF loading or XML generation.
+Phase 0 defines the execution contract for the importer. It applies to every RDF source; source ontology conventions belong only in profiles.
 
 ## Authority Boundaries
 
-The core detects standard RDF, RDFS, OWL and SKOS constructs. It contains no source ontology URI, term, datatype correspondence or external namespace identifier. The OntoME XSD defines XML validity. The capability profile defines the supported subset of that XSD. The mapping profile provides every source-to-target decision.
+The core detects standard RDF, RDFS, OWL and SKOS constructs. It contains no source ontology URI, term, datatype correspondence or external namespace identifier. The OntoME XSD defines XML validity. The capability profile defines the subset that the current writer can serialize and validate. The mapping profile provides every RDF-to-XML transformation and approved decision journal. The namespace registry contains externally supplied OntoME namespace data. Editorial exceptions may complete only a missing property domain or range; they must never hide or replace an RDF assertion.
 
 ## Versioned Artifacts
 
@@ -17,14 +17,26 @@ The XSD public URL does not expose a version number. Its local version is its re
 
 ## Strict Decisions
 
-`mapped` means that a complete, valid target representation exists. `configured` means a rule exists but required configured data is absent. `excluded` requires a documented reason. `blocked` means no valid rule applies. `invalid` means source or configuration data is contradictory.
+`status` is the operational result: `mapped` means that a complete target representation exists; `configured` means a rule still needs a configuration decision; `excluded` requires a documented reason; `blocked` means generation cannot continue; `invalid` means source or configuration data is contradictory.
 
-Strict mode is always `true` in format version 1.0. In-scope `configured`, `blocked` and `invalid` entries prevent generation. Out-of-scope assertions remain in the inventory and are not treated as exclusions.
+Every in-scope finding also has a `category`, which records the cause independently from the operational result: `mechanical_transformation`, `intentional_exclusion`, `configuration_required`, `missing_profile_rule`, `missing_external_data`, `forbidden_external_namespace`, `ambiguous_source_data`, `incomplete_source_data`, `invalid_source_data`, `unsupported_rdf_construct`, or `invalid_profile`.
+
+Strict mode is always `true`. In-scope `configured`, `blocked` and `invalid` entries prevent generation. Out-of-scope assertions remain in the inventory and are not treated as exclusions.
 
 ## Configuration Policy
 
-The manifest records the source file used for execution separately from its optional documentary source URI. Mapping scope is explicit through resource selectors. No namespace is included by default. A missing language, datatype, domain, range, anonymous structure or external namespace requires a mapping decision; it is never fabricated.
+The manifest records the source file used for execution separately from its optional documentary source URI. Mapping scope is explicit through resource selectors. No namespace is included by default. The mapping profile defines resource selection and transformations only. The namespace registry provides URI-prefix, OntoME namespace ID, status, and provenance only. The XLSX workbook is a review surface: generation reads compiled YAML, never a workbook directly.
+
+No value is fabricated. A missing language, datatype, domain, range, external namespace datum, or mapping rule blocks or requires configuration. The core does not infer OWL semantics, parse prose, or derive cross-vocabulary semantic equivalences. An in-scope RDF assertion is either transformed, explicitly excluded with a reason, or reported as blocking.
+
+## Generation Invariants
+
+- A successful generation is validated against the selected XSD and is byte-deterministic for identical inputs.
+- Every XML leaf has trace provenance from RDF, configuration, or an approved editorial exception.
+- Every external XML reference has a root namespace declaration and is permitted by the registry and mapping.
+- Every local XML reference names a generated local identifier.
+- A capability profile cannot advertise class or property fields that the XML writer does not serialize.
 
 ## Verification
 
-Run `python tools/validate_phase0.py`. It checks XSD integrity and compilation, valid YAML profiles, the invalid-exclusion fixture, and report-schema fixtures.
+Run `python tools/validate_phase0.py` and `python tools/validate_contracts.py`. They check XSD integrity and compilation, valid YAML profiles, the invalid-exclusion fixture, and report-schema fixtures. The application test suite verifies audit categorization, capability/writer alignment, deterministic generation, trace completeness, and independent bundle validation.
