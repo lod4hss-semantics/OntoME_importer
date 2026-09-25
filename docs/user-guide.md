@@ -134,6 +134,9 @@ ontome-importer init \
   --source ~/Téléchargements/mon-ontologie.rdf \
   --format rdfxml \
   --scope-uri-prefix https://mon-organisation.example/ontology/ \
+  --target-namespace-uri https://ontome.net/ns/mon-organisation/ \
+  --target-label "Ontologie de mon organisation" \
+  --target-label-lang fr \
   --workspace ~/Documents/imports/mon-ontologie
 ```
 
@@ -201,20 +204,9 @@ Le XSD OntoME est livré avec l'outil. Vous n'avez pas à chercher ou copier un 
 
 ### Les décisions d'import, après l'audit
 
-Le profil de transformation de génération est nommé techniquement `mapping-generation.yaml`. Il décrit les règles de publication décidées pour votre import. Il répond notamment à ces questions :
+La revue terminale vous demande pour chaque ressource si elle doit être publiée ou exclue. Elle résout aussi les références vers des namespaces OntoME existants. Vous ne modifiez pas les profils YAML : `review finalize` les génère à partir des décisions enregistrées.
 
-- Quelles URI source deviennent des classes dans le namespace OntoME cible ?
-- Quelles URI source deviennent des propriétés objet, datatype ou RDF dans ce namespace ?
-- Quel prédicat fournit le label ?
-- Quelle règle explicite fournit l'identifiant local : suffixe d'URI, capture regex ou valeur littérale d'un prédicat ?
-- Quel commentaire ou scope note devient une note XML ?
-- Quelle relation RDF devient `subClassOf`, `inverseOf` ou `hasRange` ?
-- Quelle règle transforme une URI externe en référence technique vers un namespace OntoME existant et un identifiant de terme ?
-- Quelle décision approuvée justifie une règle de transformation, une exclusion ou une exception éditoriale ?
-
-Vous ne devez pas répondre à ces questions avant le premier audit. Le rapport d'audit donne la liste exacte des éléments sur lesquels l'équipe doit se prononcer. Il ne demande pas de décider d'un alignement sémantique avec OntoME : les ressources sélectionnées sont publiées dans le namespace cible.
-
-La syntaxe complète est dans [Configuration Guide](configuration.md).
+Vous ne devez pas prendre ces décisions avant le premier audit. Le rapport donne la liste exacte des éléments sur lesquels l'équipe doit se prononcer. Il ne demande pas de décider d'un alignement sémantique avec OntoME : les ressources sélectionnées sont publiées dans le namespace cible.
 
 ## Les commandes, dans l'ordre
 

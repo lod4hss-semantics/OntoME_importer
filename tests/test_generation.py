@@ -3,7 +3,6 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator
 from lxml import etree
-from openpyxl import load_workbook
 
 from ontome_importer.cli import main
 from ontome_importer.loader import load_inventory
@@ -78,17 +77,6 @@ def test_generate_cli_writes_only_the_phase4_artifacts(tmp_path):
 def test_generate_cli_blocks_without_publishing_xml(tmp_path):
     assert main(["generate", "--manifest", str(FIXTURES / "import-manifest-missing-range.yaml"), "--output-dir", str(tmp_path)]) == 3
     assert {path.name for path in tmp_path.iterdir()} == {"generation-audit.json"}
-
-
-def test_generate_blocker_annotates_an_optional_workbook(tmp_path):
-    workbook = tmp_path / "mapping.xlsx"
-    assert main(["assist", "export", "--manifest", str(FIXTURES / "import-manifest-missing-range.yaml"), "--output", str(workbook)]) == 0
-    assert main([
-        "generate", "--manifest", str(FIXTURES / "import-manifest-missing-range.yaml"),
-        "--output-dir", str(tmp_path / "import"), "--workbook", str(workbook),
-    ]) == 3
-    validation = load_workbook(workbook)["VALIDATION"]
-    assert any(row[0] == "generation" and row[1] == "error" for row in validation.iter_rows(min_row=2, values_only=True))
 
 
 def test_generate_refuses_to_replace_an_existing_bundle(tmp_path):

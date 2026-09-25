@@ -1,0 +1,11 @@
+@prefix ex: <https://example.org/e2e/> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+ex:Concept a owl:Class ;
+  rdfs:label "Concept"@en .
+
+ex:hasName a owl:DatatypeProperty ;
+  rdfs:label "has name"@en ;
+  rdfs:domain ex:Concept ;
+  rdfs:range ex:Concept .

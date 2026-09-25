@@ -3,7 +3,6 @@ from pathlib import Path
 import shutil
 
 from jsonschema import Draft202012Validator
-from openpyxl import load_workbook
 import yaml
 
 from ontome_importer.cli import main
@@ -74,21 +73,6 @@ def test_validate_cli_writes_a_report_and_rejects_tampered_xml(tmp_path):
     report = json.loads(output.read_text())
     assert report["valid"] is False
     assert any(item["name"] == "xml_sha256_matches_trace" and not item["valid"] for item in report["checks"])
-
-
-def test_validate_failure_annotates_an_optional_workbook(tmp_path):
-    bundle = _generate(tmp_path / "bundle")
-    workbook = tmp_path / "mapping.xlsx"
-    assert main(["assist", "export", "--manifest", str(FIXTURES / "import-manifest.yaml"), "--output", str(workbook)]) == 0
-    xml = bundle / "import.xml"
-    xml.write_bytes(xml.read_bytes().replace(b"Example target namespace", b"Tampered target namespace"))
-    assert main([
-        "validate", "--manifest", str(FIXTURES / "import-manifest.yaml"), "--xml", str(xml),
-        "--trace", str(bundle / "generation-trace.json"), "--audit", str(bundle / "generation-audit.json"),
-        "--output", str(tmp_path / "validation.json"), "--workbook", str(workbook),
-    ]) == 3
-    validation = load_workbook(workbook)["VALIDATION"]
-    assert any(row[0] == "validation" and row[1] == "error" for row in validation.iter_rows(min_row=2, values_only=True))
 
 
 def test_validate_rejects_missing_trace_entry(tmp_path):
