@@ -7,7 +7,7 @@ import yaml
 
 from ontome_importer.cli import main
 from ontome_importer.loader import load_inventory
-from ontome_importer.mapping_assistant import AssistantError, _catalog_identifiers, _external_uris
+from ontome_importer.mapping_assistant import AssistantError, _catalog_identifiers, _external_uris, _resolve_catalog_identifier
 from ontome_importer.profiles import load_generation_profiles
 
 
@@ -91,7 +91,7 @@ def test_compile_preserves_unreferenced_namespace_rows(tmp_path):
     workbook = tmp_path / "mapping.xlsx"
     assert main(["assist", "export", "--manifest", str(MANIFEST), "--output", str(workbook)]) == 0
     document = load_workbook(workbook)
-    document["NAMESPACE_REGISTRY"].append(("https://example.org/reserved/", 999, "forbidden", "test", ""))
+    document["NAMESPACE_REGISTRY"].append(("https://example.org/reserved/", "", 999, "forbidden", "test", ""))
     document.save(workbook)
     registry = tmp_path / "registry.yaml"
     assert main([
@@ -149,6 +149,12 @@ def test_catalog_identifiers_require_one_literal_per_uri(tmp_path):
     )
     with pytest.raises(AssistantError, match="ambiguous"):
         _catalog_identifiers(load_inventory(catalog, "ntriples"), predicate)
+
+
+def test_catalog_identifier_matches_a_verified_compact_identifier_token():
+    catalog = {"http://www.cidoc-crm.org/cidoc-crm/E7": "E7"}
+    assert _resolve_catalog_identifier("http://www.cidoc-crm.org/cidoc-crm/E7_Activity", catalog) == "E7"
+    assert _resolve_catalog_identifier("http://www.cidoc-crm.org/cidoc-crm/E70_Thing", catalog) is None
 
 
 def test_external_reference_list_respects_rdf_type_scope_selectors():

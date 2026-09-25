@@ -25,7 +25,7 @@ Strict mode is always `true`. In-scope `configured`, `blocked` and `invalid` ent
 
 ## Configuration Policy
 
-The manifest records the source file used for execution separately from its optional documentary source URI. Mapping scope is explicit through resource selectors. No namespace is included by default. The mapping profile defines resource selection and transformations only. The namespace registry provides URI-prefix, OntoME namespace ID, status, and provenance only. The XLSX workbook is a review surface: generation reads compiled YAML, never a workbook directly.
+The manifest records the source file used for execution separately from its optional documentary source URI. Transformation scope is explicit through resource selectors. No namespace is included by default. The internal transformation profile defines resource selection and serialization only. The namespace registry provides URI, version, OntoME namespace ID, status, and provenance. The local terminal review is the human decision surface; generation reads only its finalized internal profiles.
 
 No value is fabricated. A missing language, datatype, domain, range, external namespace datum, or mapping rule blocks or requires configuration. The core does not infer OWL semantics, parse prose, or derive cross-vocabulary semantic equivalences. An in-scope RDF assertion is either transformed, explicitly excluded with a reason, or reported as blocking.
 

@@ -14,7 +14,7 @@ L'objectif est d'éviter un XML d'import qui invente des labels, des langues, de
 
 L'outil ne réalise pas un alignement sémantique entre l'ontologie source et OntoME. Il publie les classes et propriétés de la source dans le nouveau namespace OntoME décrit par le projet d'import. Lorsqu'une ressource source référence un terme d'un namespace déjà présent dans OntoME, le XML produit une référence technique vers ce namespace et cet identifiant de terme. Par exemple, une sous-classe de `.../E89_Propositional_Object` peut devenir une référence à `E89` avec l'attribut `referenceNamespace` correspondant au namespace OntoME de la version CRM concernée.
 
-Le logiciel emploie historiquement le mot technique `mapping` dans les noms de fichiers, les commandes et le classeur, par exemple `mapping-generation.yaml` et `mapping.xlsx`. Dans ce guide, il désigne uniquement un ensemble de règles déclaratives de transformation RDF-vers-XML et de décisions de publication. Il ne désigne jamais un alignement entre des concepts de l'ontologie source et des concepts OntoME.
+Le logiciel conserve temporairement quelques noms internes historiques contenant `mapping`. Ils ne correspondent pas à un alignement sémantique : les décisions de publication sont prises dans la revue terminale et l'outil génère ensuite ses profils techniques.
 
 ## Ce que l'outil fait et ne fait pas
 
@@ -44,13 +44,13 @@ flowchart TD
     O([Vous installez l'outil<br/>une seule fois])
     A([Vous choisissez une ontologie RDF<br/>pour un projet d'import])
     P[/"Vous lancez init : l'outil crée<br/>un espace de travail pour ce projet"/]
-    B[/"L'outil réalise l'audit<br/>et crée le classeur de décisions"/]
-    C[[Inventaire RDF, résumé<br/>et classeur XLSX]]
-    D([L'équipe travaille dans le classeur XLSX])
+    B[/"L'outil réalise l'audit<br/>et prépare la revue"/]
+    C[[Inventaire RDF, résumé<br/>et file de revue]]
+    D([L'équipe répond aux questions<br/>dans le terminal])
     E([Discussion et décisions d'import])
-    F[/"L'outil contrôle le classeur<br/>et signale les blocages"/]
-    Q{Le classeur est-il<br/>complet ?}
-    R[/"L'outil compile les YAML<br/>depuis le classeur"/]
+    F[/"L'outil contrôle les décisions<br/>et signale les blocages"/]
+    Q{La revue est-elle<br/>complète ?}
+    R[/"L'outil compile les profils<br/>depuis les décisions"/]
     G[/"L'outil tente de générer le XML OntoME"/]
     H{Toutes les décisions<br/>sont-elles complètes ?}
     I[[Rapport de génération :<br/>ce qui bloque]]
@@ -229,9 +229,7 @@ cd ~/Documents/imports/mon-ontologie
 ```bash
 ontome-importer audit \
   --manifest config/audit.yaml \
-  --generation-manifest config/generation.yaml \
-  --output-dir build/audit \
-  --workbook decisions/mapping.xlsx
+  --output-dir build/audit
 ```
 
 Cette commande utilise exactement le manifest indiqué après `--manifest`. Elle produit :
@@ -239,52 +237,37 @@ Cette commande utilise exactement le manifest indiqué après `--manifest`. Elle
 - `build/audit/inventory.json` : tout ce qui a été lu dans le RDF ;
 - `build/audit/audit.json` : le rapport complet détaillé ;
 - `build/audit/audit.md` : le résumé à lire en priorité.
-- `decisions/mapping.xlsx` : le classeur à compléter avec l'équipe.
+- `build/audit/review-queue.json` : la file de revue utilisée par le terminal.
 
-L'audit peut se terminer avec le code `0` tout en signalant des blocages. C'est normal : il a terminé son analyse. Travaillez ensuite dans le classeur, pas dans la liste détaillée du Markdown.
+L'audit peut se terminer avec le code `0` tout en signalant des blocages. C'est normal : il a terminé son analyse. Lancez ensuite la revue terminale.
 
-### 2. Compléter les règles de transformation
+### 2. Revoir les décisions de publication
 
-Le classeur, dont le nom de fichier peut être `mapping.xlsx`, distingue les classes, propriétés, références externes, exceptions éditoriales, journal de décisions, métadonnées et règles. Il sert à revoir les règles de publication et les exceptions, pas à réaliser un alignement sémantique. Modifiez seulement les feuilles indiquées par la page `SUMMARY`; les autres feuilles sont des diagnostics dérivés. Après les décisions de l'équipe, contrôlez-le puis compilez les YAML utilisés par la génération :
-
-```bash
-ontome-importer assist check \
-  --manifest config/generation.yaml \
-  --workbook decisions/mapping.xlsx \
-  --output build/assistant/check-report.json
-
-ontome-importer assist compile \
-  --manifest config/generation.yaml \
-  --workbook decisions/mapping.xlsx \
-  --mapping-output config/profiles/mapping-generation.yaml \
-  --registry-output config/profiles/namespace-registry.yaml \
-  --report-output build/assistant/compile-report.json
-```
-
-`assist check` est en lecture seule : il produit un rapport sans modifier le classeur. Pour mettre à jour les onglets de validation et les couleurs du même classeur, sans modifier les décisions saisies, utilisez `assist refresh` :
+La revue est locale et guidée. Elle enregistre les décisions dans `decisions/review.json` sans exposer les profils techniques.
 
 ```bash
-ontome-importer assist refresh \
+ontome-importer review start \
   --manifest config/generation.yaml \
-  --workbook decisions/mapping.xlsx \
-  --output build/assistant/refresh-report.json
+  --session decisions/review.json
+
+ontome-importer review resources --session decisions/review.json
+ontome-importer review status --session decisions/review.json
+ontome-importer review check --session decisions/review.json
+ontome-importer review finalize \
+  --manifest config/generation.yaml \
+  --session decisions/review.json
 ```
 
-`assist compile` refuse les décisions incomplètes, valide les YAML compilés avant publication et refuse les chemins de sortie en conflit. En cas d'échec, les profils existants restent inchangés.
-
-Un catalogue RDF externe est facultatif. Lorsqu'il porte un identifiant canonique unique pour chaque URI, l'assistant peut préremplir les références exactes ; vous indiquez explicitement le prédicat qui porte cet identifiant et le namespace OntoME correspondant :
+Lorsqu'une relation RDF pointe vers un terme déjà publié dans OntoME, sélectionnez d'abord le namespace par son URI et sa version. Le registre OntoME livré avec l'outil vérifie cette sélection et la commande télécharge ensuite un catalogue RDF/XML local et traçable. Par exemple, pour CIDOC CRM 7.1.3 :
 
 ```bash
-ontome-importer assist export \
-  --manifest config/generation.yaml \
-  --catalog chemin/vers/catalogue.rdf \
-  --catalog-format rdfxml \
-  --catalog-identifier-predicate https://example.org/vocabulary/identifier \
-  --catalog-namespace-id 123 \
-  --output decisions/mapping-assistant.xlsx
+ontome-importer namespaces fetch \
+  --uri http://www.cidoc-crm.org/cidoc-crm/ \
+  --version 7.1.3 \
+  --output references/ontome/crm-7.1.3.rdf
 ```
 
-Sans catalogue, le classeur liste les références externes détectées dans `EXTERNAL_USAGE`. Ajouter une règle dans `EXTERNAL_REFERENCE_RULES` lorsque l'identifiant est dérivable, ou une entrée dans `EXTERNAL_EXCEPTIONS` pour un cas exact. Une telle référence est technique : elle conserve dans le XML le lien vers un terme d'un namespace OntoME existant.
+Le catalogue exporté par OntoME fournit les identifiants canoniques dans `skos:notation`. La revue télécharge et vérifie ce catalogue après confirmation de la dépendance. Les références sont ensuite résolues automatiquement ; ne saisissez pas d'identifiant OntoME par déduction d'URI. Si une URI externe est absente du catalogue sélectionné, elle reste bloquante et le terminal indique l'URI, le namespace et la version à clarifier.
 
 Pour un identifiant local, choisissez une règle explicite. L'outil peut extraire un suffixe d'URI, appliquer une capture regex ou utiliser la valeur littérale unique d'un prédicat. Par exemple, si l'ontologie source porte les identifiants canoniques `F1` ou `R1` dans `skos:notation`, le profil peut définir :
 
@@ -314,8 +297,7 @@ Lorsque le profil de transformation de génération est complet :
 ```bash
 ontome-importer generate \
   --manifest config/generation.yaml \
-  --output-dir build/import \
-  --workbook decisions/mapping.xlsx
+  --output-dir build/import
 ```
 
 Cette commande relit la source, refait l'audit, applique les règles de transformation, écrit le XML et le valide contre le XSD OntoME.
@@ -326,7 +308,7 @@ En succès, elle écrit :
 - `build/import/generation-trace.json` ;
 - `build/import/generation-audit.json`.
 
-En cas de blocage, elle écrit seulement `generation-audit.json`. Elle n'écrit jamais de XML final incomplet. Lorsque `--workbook` est fourni, les blocages sont aussi reportés dans le classeur, sans modifier les décisions saisies.
+En cas de blocage, elle écrit seulement `generation-audit.json`. Elle n'écrit jamais de XML final incomplet.
 
 ### 4. Valider le résultat
 
@@ -336,11 +318,10 @@ ontome-importer validate \
   --xml build/import/import.xml \
   --trace build/import/generation-trace.json \
   --audit build/import/generation-audit.json \
-  --output build/import/validation.json \
-  --workbook decisions/mapping.xlsx
+  --output build/import/validation.json
 ```
 
-Cette commande vérifie le XML, le XSD, les identifiants, les références, les checksums, la trace et la cohérence avec votre RDF et vos profils. Lorsque `--workbook` est fourni, ses erreurs sont également inscrites dans l'onglet `VALIDATION`.
+Cette commande vérifie le XML, le XSD, les identifiants, les références, les checksums, la trace et la cohérence avec votre RDF et vos profils.
 
 Le XML et ses rapports sont prêts à transmettre seulement lorsque `build/import/validation.json` contient :
 
@@ -363,7 +344,8 @@ Pour qu'un import soit rejouable, conserver ensemble :
 - la source RDF ;
 - les deux manifests ;
 - les cinq profils ;
-- le classeur de décisions ou, à défaut, son journal compilé dans le profil `mapping-generation.yaml` ;
+- `decisions/review.json`, son journal et les catalogues OntoME téléchargés ;
+- les profils internes compilés par `review finalize` ;
 - le XML généré ;
 - la trace de génération ;
 - les audits ;

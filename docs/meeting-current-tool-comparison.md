@@ -23,7 +23,7 @@ ensemble.
 | Lire l'ontologie | Liste les ressources, liens, textes, langues, types de donnees et structures RDF. |
 | Signaler les cas difficiles | Detecte les elements pris en charge, non pris en charge, incomplets ou ambigus. |
 | Garder les informations source | Conserve les informations lues au lieu de les ignorer silencieusement. |
-| Preparer des decisions | Produit un rapport et un classeur optionnel pour enregistrer les choix. |
+| Preparer des decisions | Produit un rapport et une revue locale guidée dans le terminal. |
 | Produire un XML | Genere le XML seulement si les regles sont completes. |
 | Verifier le resultat | Controle le XML, les identifiants, les liens externes et la coherence avec la source. |
 | Rejouer un import | Vérifie les empreintes et peut reconstruire le même résultat, dans les cas couverts par ses règles et contrôles. |
@@ -34,8 +34,8 @@ ensemble.
 | --- | --- | --- |
 | Namespace OntoME cible | C'est une decision de projet et de publication. | Projet OntoME et responsable editorial. |
 | Version, libelle et description officiels | Ces informations peuvent ne pas etre presentes ou etre insuffisantes dans le RDF. | Proprietaire de l'ontologie. |
-| ID OntoME de CRM 7.1.3 | L'ancien registre local est date et ne fait pas autorite. | Catalogue ou equipe OntoME. |
-| ID exact d'un terme OntoME | Le nom dans une URI ne suffit pas toujours. | Catalogue de termes OntoME. |
+| ID OntoME de CRM 7.1.3 | Le registre OntoME versionné associe CRM 7.1.3 à l'ID 188. | Registre fourni par l'équipe OntoME. |
+| ID exact d'un terme OntoME | Il est résolu depuis l'export RDF du namespace OntoME sélectionné. | API d'export du namespace. |
 | Ce qui doit etre conserve | RDF/OWL contient parfois des informations que le XML ne represente pas directement. | Proprietaire de l'ontologie et OntoME. |
 | Ce qui peut etre exclu | C'est un choix editorial avec des consequences. | Relecteur metier et responsable editorial. |
 | Regle pour les datatypes | Les anciennes conversions CRM ne sont pas une regle officielle connue. | OntoME et experts CRM. |
@@ -45,8 +45,8 @@ ensemble.
 
 | Sujet | Etat actuel | Ce qui est a faire |
 | --- | --- | --- |
-| Liste officielle OntoME | L'outil peut lire une liste RDF fournie, mais aucune source officielle à jour n'a été identifiée dans le dépôt. | Obtenir la source officielle, son format et son rythme de mise à jour. |
-| Choix humains | Le classeur permet de saisir des decisions, mais ne propose pas de reponse metier. | Definir qui decide, comment les choix sont approuves et comment ils sont conserves. |
+| Liste officielle OntoME | Le registre URI/version/ID fourni par l'équipe OntoME est livré avec l'outil ; l'API fournit les catalogues RDF de termes. | Définir le rythme de mise à jour du registre. |
+| Choix humains | La revue terminale enregistre les décisions et leur journal local. | Définir qui confirme les décisions de publication. |
 | Notes et exemples | L'outil demande une regle explicite pour les envoyer dans le bon champ XML. | Decider quels predicats RDF vont vers quels champs OntoME. |
 | Règles indiquant combien de liens sont permis | L'outil actuel ne les produit pas. | Confirmer si elles sont nécessaires; définir source, règle et contrôles si oui. |
 | Libellés des liens inverses | L'outil actuel garde le lien inverse si une règle le décrit, mais ne fabrique pas automatiquement son libellé. | Dire si ce libellé est obligatoire et d'où il vient. |
@@ -77,8 +77,7 @@ Une fois les reponses obtenues, le travail pourra etre classe en trois groupes :
 
 ## Decision de produit a ne pas prendre trop tot
 
-Il est premature de choisir definitivement entre un classeur, des fichiers YAML
-ou une interface web. Ce choix depend d'abord :
+Le parcours utilisateur retenu est une revue locale dans le terminal. Les profils YAML restent des artefacts internes compilés. Son évolution dépend :
 
 - des personnes qui prendront les decisions ;
 - du nombre et du type de decisions a documenter ;

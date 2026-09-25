@@ -3,7 +3,7 @@ import pytest
 from ontome_importer.external_references import ExternalReferenceError, resolve_external_reference, validate_external_reference_configuration
 
 
-REGISTRY = {"format_version": "1.0", "namespaces": [{"uri": "https://example.org/external/", "ontome_namespace_id": 123, "status": "active", "source": "test"}]}
+REGISTRY = {"format_version": "1.1", "namespaces": [{"uri": "https://example.org/external/", "version": None, "ontome_namespace_id": 123, "status": "active", "source": "test"}]}
 
 
 def _mapping(rules, references=()):

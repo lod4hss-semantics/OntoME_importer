@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://lod4hss.org/ontome-importer/schemas/namespace-registry-1.0.json",
+  "$id": "https://lod4hss.org/ontome-importer/schemas/namespace-registry-1.1.json",
   "title": "OntoME namespace registry",
   "type": "object",
   "additionalProperties": false,
   "required": ["format_version", "namespaces"],
   "properties": {
-    "format_version": {"const": "1.0"},
+    "format_version": {"enum": ["1.0", "1.1"]},
     "namespaces": {
       "type": "array", "uniqueItems": true,
       "items": {
@@ -14,6 +14,7 @@
         "required": ["uri", "ontome_namespace_id", "status", "source"],
         "properties": {
           "uri": {"type": "string", "format": "uri"},
+          "version": {"type": ["string", "null"]},
           "ontome_namespace_id": {"type": "integer", "minimum": 1},
           "status": {"enum": ["active", "deprecated", "forbidden"]},
           "source": {"type": "string", "minLength": 1},
@@ -21,5 +22,9 @@
         }
       }
     }
-  }
+  },
+  "allOf": [{
+    "if": {"properties": {"format_version": {"const": "1.1"}}},
+    "then": {"properties": {"namespaces": {"items": {"required": ["version"]}}}}
+  }]
 }

@@ -27,7 +27,7 @@ RULE_COLUMNS = (
     "identifier_source", "identifier_strip_prefix", "identifier_predicate", "identifier_pattern", "label_predicates", "identifier_in_uri", "relations_json", "text_fields_json",
     "domain_predicate", "range_predicate", "reason", "decision_needed",
 )
-NAMESPACE_COLUMNS = ("uri", "ontome_namespace_id", "status", "source", "verified_at")
+NAMESPACE_COLUMNS = ("uri", "version", "ontome_namespace_id", "status", "source", "verified_at")
 EXCEPTION_COLUMNS = ("uri", "reference_namespace", "identifier", "source", "notes")
 EXTERNAL_RULE_COLUMNS = ("id", "uri_prefix", "reference_namespace", "identifier_source", "identifier_pattern")
 EDITORIAL_EXCEPTION_COLUMNS = ("id", "resource_uri", "field", "reference_uri", "status", "rationale", "approved_by", "approved_at", "decision_reference")
@@ -52,9 +52,9 @@ def export_workbook(
     inventory: Inventory,
     catalog: Inventory | None = None,
     catalog_identifier_predicate: str | None = None,
+    catalog_namespace_version: str | None = None,
     catalog_namespace_id: int | None = None,
 ) -> None:
-    catalog_identifiers = _catalog_identifiers(catalog, catalog_identifier_predicate) if catalog else {}
     report = audit_inventory(inventory, profiles.capability, profiles.mapping, profiles.namespace_registry)
     workbook = Workbook()
     readme = workbook.active
@@ -86,6 +86,11 @@ def export_workbook(
     exceptions.append(EXCEPTION_COLUMNS)
     existing_references = {item["uri"]: item for item in profiles.mapping["external_references"]}
     detected_external_uris = _external_uris(inventory, profiles.mapping)
+    catalog_terms = _catalog_identifiers(catalog, catalog_identifier_predicate) if catalog else {}
+    catalog_identifiers = {
+        uri: identifier for uri in detected_external_uris
+        if (identifier := _resolve_catalog_identifier(uri, catalog_terms)) is not None
+    }
     ordered_external_uris = [item["uri"] for item in profiles.mapping["external_references"]]
     ordered_external_uris.extend(uri for uri in detected_external_uris if uri not in existing_references)
     for reference in profiles.mapping["external_references"]:
@@ -110,7 +115,7 @@ def export_workbook(
         registered = {item["uri"] for item in profiles.namespace_registry["namespaces"]}
         for prefix in sorted({_uri_prefix(uri) for uri in catalog_identifiers if uri in detected_external_uris}):
             if prefix not in registered:
-                namespaces.append((prefix, catalog_namespace_id, "active", f"catalog:{catalog.source_file}", ""))
+                namespaces.append((prefix, catalog_namespace_version or "", catalog_namespace_id, "active", f"catalog:{catalog.source_file}", ""))
     classes = workbook.create_sheet("CLASSES")
     properties = workbook.create_sheet("PROPERTIES")
     for sheet in (classes, properties):
@@ -223,7 +228,7 @@ def compile_workbook(path: Path, profiles: GenerationProfiles, inventory: Invent
     editorial_exceptions = [dict(row) for row in _sheet_rows(workbook["EDITORIAL_EXCEPTIONS"], EDITORIAL_EXCEPTION_COLUMNS) if row["id"]]
     decisions = [{key: value for key, value in row.items() if value != ""} for row in _sheet_rows(workbook["DECISIONS"], DECISION_COLUMNS) if row["id"]]
     mapping = {"format_version": "7.0", "scope": profiles.mapping["scope"], "rules": rules, "external_references": references, "external_reference_rules": external_rules, "editorial_exceptions": editorial_exceptions, "decisions": decisions}
-    registry = {"format_version": "1.0", "namespaces": namespaces}
+    registry = {"format_version": "1.1", "namespaces": namespaces}
     validate_compiled_profiles(mapping, registry, profiles)
     report["provenance"] = {
         "workbook_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
@@ -426,7 +431,7 @@ def _rule_to_row(rule: dict[str, object]) -> tuple[object, ...]:
 
 
 def _namespace_from_row(row: dict[str, object]) -> dict[str, object]:
-    result = {"uri": row["uri"], "ontome_namespace_id": int(row["ontome_namespace_id"]), "status": row["status"], "source": row["source"]}
+    result = {"uri": row["uri"], "version": row["version"] or None, "ontome_namespace_id": int(row["ontome_namespace_id"]), "status": row["status"], "source": row["source"]}
     if row["verified_at"]:
         result["verified_at"] = row["verified_at"]
     return result
@@ -456,6 +461,7 @@ def _external_uris(inventory: Inventory, mapping: dict[str, object]) -> list[str
     return sorted({
         triple.object.value for triple in inventory.triples
         if triple.object.kind == "uri" and not _in_scope(triple.object.value, mapping, inventory)
+        and triple.predicate.value not in {f"{OWL}imports", f"{OWL}versionIRI", f"{OWL}versionInfo"}
         and (not triple.object.value.startswith((RDF, RDFS, OWL, SKOS, XSD)) or triple.predicate.value in standard_reference_predicates)
     })
 
@@ -482,6 +488,19 @@ def _catalog_identifiers(catalog: Inventory | None, predicate: str | None) -> di
     if ambiguous:
         raise AssistantError(f"Catalog identifier predicate is ambiguous for: {ambiguous[0]}")
     return {uri: next(iter(identifiers)) for uri, identifiers in values.items()}
+
+
+def _resolve_catalog_identifier(source_uri: str, catalog_identifiers: dict[str, str]) -> str | None:
+    """Resolve an external URI only when a selected OntoME catalog verifies its token."""
+    exact = catalog_identifiers.get(source_uri)
+    if exact is not None:
+        return exact
+    terminal = source_uri.rsplit("#", 1)[-1].rsplit("/", 1)[-1]
+    matches = {
+        identifier for identifier in catalog_identifiers.values()
+        if terminal == identifier or terminal.startswith(f"{identifier}_")
+    }
+    return next(iter(matches)) if len(matches) == 1 else None
 
 
 def _uri_prefix(uri: str) -> str:

@@ -62,6 +62,8 @@ def audit_inventory(
     for triple in inventory.triples:
         if triple.object.kind != "uri" or _is_local(triple.object, inventory, mapping):
             continue
+        if triple.predicate.value in {f"{OWL}imports", f"{OWL}versionIRI", f"{OWL}versionInfo"}:
+            continue
         if _is_standard(triple.object) and not _standard_reference_predicate(triple.predicate.value):
             continue
         status = _registered_namespace_status(triple.object.value, namespace_registry)

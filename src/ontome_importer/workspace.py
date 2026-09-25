@@ -58,7 +58,7 @@ def initialize_workspace(
         profiles.mkdir(parents=True)
         _write_template("templates/audit/capability-1.1.yaml", profiles / "capability-audit.yaml")
         _write_template("templates/generation/capability-1.0.yaml", profiles / "capability-generation.yaml")
-        _write_template("templates/namespace-registry-1.0.yaml", profiles / "namespace-registry.yaml")
+        _write_template("templates/namespace-registry-1.1.yaml", profiles / "namespace-registry.yaml")
         (profiles / "mapping-audit.yaml").write_text(_audit_mapping(scope_prefixes), encoding="utf-8")
         (profiles / "mapping-generation.yaml").write_text(_generation_mapping(scope_prefixes), encoding="utf-8")
         config = staging / "config"
@@ -168,7 +168,7 @@ Votre source RDF copiée est `source/{source_name}`.
 ontome-importer audit --manifest config/audit.yaml --generation-manifest config/generation.yaml --output-dir build/audit --workbook decisions/mapping.xlsx
 ```
 
-Travaillez dans `decisions/mapping.xlsx` avec l'équipe d'import. Le premier audit signale normalement des blocages : aucune décision de mapping n'a encore été prise. Après vos décisions, contrôlez puis compilez le classeur ; les YAML compilés restent les entrées de génération.
+ Travaillez dans `decisions/mapping.xlsx` avec l'équipe d'import. Si l'audit détecte une ontologie externe, sélectionnez d'abord sa version OntoME explicite, récupérez son catalogue RDF avec `ontome-importer namespaces fetch`, puis utilisez ce catalogue pour préremplir les références exactes. Le premier audit signale normalement des blocages : aucune décision de transformation n'a encore été prise. Après vos décisions, contrôlez puis compilez le classeur ; les YAML compilés restent les entrées de génération.
 
 Après les décisions de l'équipe sur les éléments à importer, remplacez les valeurs `TODO` dans `config/generation.yaml`, puis exécutez :
 

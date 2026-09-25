@@ -35,7 +35,7 @@ ontome-importer --help
 ontome-importer --version
 ```
 
-`init` creates a new import workspace. `audit` uses a manifest and mapping profile 1.1. `assist` offers an optional XLSX editing surface and compiles explicit decisions to YAML. `generate` and `validate` use the complete manifest/capability 1.0 contracts with mapping profile 7.0. Follow the [User Guide](docs/user-guide.md) for the full `init → audit → assist → generate → validate` workflow, files produced and exit codes.
+`init` creates a new import workspace. `audit` inventories the RDF and prepares a review queue. `review` records publication decisions locally in the terminal and compiles internal profiles. `generate` and `validate` use the complete manifest/capability 1.0 contracts. Follow the [User Guide](docs/user-guide.md) for the full `init → audit → review → generate → validate` workflow, files produced and exit codes.
 
 ## Legacy Material
 

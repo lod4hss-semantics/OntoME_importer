@@ -29,7 +29,7 @@ def test_init_creates_a_valid_auditable_workspace(tmp_path, capsys):
     generation = load_generation_profiles(workspace / "config/generation.yaml")
     verify_capability_xsd(generation.capability)
     assert main(["audit", "--manifest", str(workspace / "config/audit.yaml"), "--output-dir", str(workspace / "build/audit")]) == 0
-    assert {path.name for path in (workspace / "build/audit").iterdir()} == {"inventory.json", "audit.json", "audit.md"}
+    assert {path.name for path in (workspace / "build/audit").iterdir()} == {"inventory.json", "audit.json", "audit.md", "review-queue.json"}
 
 
 def test_init_renders_multiple_scope_prefixes_and_refuses_existing_workspace(tmp_path, capsys):

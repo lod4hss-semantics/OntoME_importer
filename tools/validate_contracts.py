@@ -52,7 +52,7 @@ def main() -> None:
     templates = ROOT / "src/ontome_importer/templates"
     _validate(ROOT / "schemas/config/capability-profile-1.1.schema.json", templates / "audit/capability-1.1.yaml")
     _validate(ROOT / "schemas/config/capability-profile.schema.json", templates / "generation/capability-1.0.yaml")
-    _validate(ROOT / "schemas/config/namespace-registry.schema.json", templates / "namespace-registry-1.0.yaml")
+    _validate(ROOT / "schemas/config/namespace-registry.schema.json", templates / "namespace-registry-1.1.yaml")
     print("All versioned contracts are valid.")
 
 

@@ -31,6 +31,7 @@ PREDICATE_CONSTRUCTS = {
 }
 CARDINALITY_PREDICATES = {f"{OWL}{name}" for name in ("cardinality", "minCardinality", "maxCardinality", "qualifiedCardinality", "minQualifiedCardinality", "maxQualifiedCardinality")}
 CHARACTERISTICS = {f"{OWL}{name}" for name in ("FunctionalProperty", "InverseFunctionalProperty", "TransitiveProperty", "SymmetricProperty", "AsymmetricProperty", "ReflexiveProperty", "IrreflexiveProperty")}
+ONTOLOGY_METADATA_PREDICATES = {f"{OWL}imports", f"{OWL}versionIRI", f"{OWL}versionInfo"}
 KNOWN_DATATYPES = {f"{XSD}{name}" for name in ("string", "boolean", "decimal", "integer", "int", "float", "double", "date", "dateTime", "time", "anyURI")}
 SEMANTIC_CONSTRUCTS = frozenset({
     "rdfs_class", "owl_class", "rdf_property", "object_property", "datatype_property", "annotation_property",
@@ -101,7 +102,7 @@ def detect_constructs(inventory: Inventory) -> tuple[ConstructOccurrence, ...]:
             occurrences.append(_occurrence("rdf_list_structure", triple.subject, triple.id))
         elif triple.predicate.value == f"{OWL}onProperty":
             occurrences.append(_occurrence("restriction_property", triple.subject, triple.id))
-        elif triple.predicate.value != f"{RDF}type":
+        elif triple.predicate.value != f"{RDF}type" and triple.predicate.value not in ONTOLOGY_METADATA_PREDICATES:
             occurrences.append(_occurrence("unknown_predicate", triple.subject, triple.id))
         if triple.object.kind == "literal" and triple.object.datatype and triple.object.datatype not in KNOWN_DATATYPES:
             occurrences.append(_occurrence("unknown_datatype", triple.subject, triple.id))

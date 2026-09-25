@@ -1,0 +1,266 @@
+{
+	"https://ontome.net/ns/ontome-internal-model/": [
+		{
+			"version": null,
+			"id": 4
+		}
+	],
+	"http://www.cidoc-crm.org/cidoc-crm/": [
+		{
+			"version": "6.2",
+			"id": 1
+		},
+		{
+			"version": "5.0.4",
+			"id": 187
+		},
+		{
+			"version": "7.1.3",
+			"id": 188
+		}
+	],
+	"http://www.ics.forth.gr/isl/CRMgeo/": [
+		{
+			"version": "1.2",
+			"id": 9
+		}
+	],
+	"http://www.opengis.net/ont/geosparql#": [
+		{
+			"version": null,
+			"id": 41
+		}
+	],
+	"https://sdhss.org/ontology/core/": [
+		{
+			"version": "1.0",
+			"id": 362
+		},
+		{
+			"version": null,
+			"id": 17
+		},
+		{
+			"version": "1.1",
+			"id": 363
+		},
+		{
+			"version": "1.2",
+			"id": 365
+		}
+	],
+	"http://iflastandards.info/ns/fr/frbr/frbroo/": [
+		{
+			"version": "2.4",
+			"id": 6
+		}
+	],
+	"http://www.cidoc-crm.org/cidoc-crm/CRMsci/": [
+		{
+			"version": "2.0",
+			"id": 193
+		},
+		{
+			"version": "1.2.3",
+			"id": 18
+		}
+	],
+	"https://ontome.net/ns/cpm/": [
+		{
+			"version": null,
+			"id": 22
+		}
+	],
+	"http://www.cidoc-crm.org/extensions/crminf/": [
+		{
+			"version": "1.0",
+			"id": 314
+		},
+		{
+			"version": "0.7",
+			"id": 42
+		}
+	],
+	"http://www.ics.forth.gr/isl/CRMdig/": [
+		{
+			"version": "4.0 unstable",
+			"id": 211
+		},
+		{
+			"version": "3.2.1",
+			"id": 47
+		}
+	],
+	"https://ontome.net/ns/spatialhierarchy/": [
+		{
+			"version": null,
+			"id": 25
+		}
+	],
+	"https://ontome.net/ns/xmlschema/": [
+		{
+			"version": null,
+			"id": 26
+		}
+	],
+	"https://ontome.net/ns/pressoo/": [
+		{
+			"version": null,
+			"id": 70
+		}
+	],
+	"https://ontology.swissartresearch.net/cpro": [
+		{
+			"version": "1.5",
+			"id": 247
+		},
+		{
+			"version": "2.3",
+			"id": 402
+		},
+		{
+			"version": "2.0",
+			"id": 339
+		},
+		{
+			"version": "1.6",
+			"id": 325
+		}
+	],
+	"https://sdhss.org/ontology/sources-information-metadata/": [
+		{
+			"version": "1.0",
+			"id": 367
+		}
+	],
+	"https://sdhss.org/ontology/crm-supplement/": [
+		{
+			"version": "1.0",
+			"id": 364
+		}
+	],
+	"https://sdhss.org/ontology/social-life-core/": [
+		{
+			"version": "1.0",
+			"id": 366
+		}
+	],
+	"https://ontome.net/ns/crmba/": [
+		{
+			"version": "1.4",
+			"id": 114
+		}
+	],
+	"https://ontology.swissartresearch.net/aaao/": [
+		{
+			"version": "1.5.4",
+			"id": 303
+		},
+		{
+			"version": "1.5",
+			"id": 246
+		},
+		{
+			"version": "1.6",
+			"id": 324
+		},
+		{
+			"version": "1.7",
+			"id": 328
+		},
+		{
+			"version": "1.7.1",
+			"id": 333
+		},
+		{
+			"version": "2.0",
+			"id": 336
+		}
+	],
+	"https://sdhss.org/ontology/archaeology/": [
+		{
+			"version": "1.0",
+			"id": 368
+		}
+	],
+	"https://sdhss.org/ontology/social-life-specific/": [
+		{
+			"version": "1.0",
+			"id": 370
+		}
+	],
+	"http://data.doremus.org/ontology#": [
+		{
+			"version": "0.2.9ontome",
+			"id": 195
+		}
+	],
+	"https://sdhss.org/ontology/human-activity/": [
+		{
+			"version": "1.0",
+			"id": 369
+		}
+	],
+	"https://takin.solutions/ontologies/CRMsurv/": [
+		{
+			"version": "1.1",
+			"id": 231
+		}
+	],
+	"http://ontologies.mpiwg-berlin.mpg.de/rdo/": [
+		{
+			"version": "3.1",
+			"id": 216
+		}
+	],
+	"http://iflastandards.info/ns/lrm/lrmoo/": [
+		{
+			"version": "1.0",
+			"id": 218
+		},
+		{
+			"version": "1.1.1",
+			"id": 423
+		}
+	],
+	"http://www.cidoc-crm.org/extensions/crmtex/": [
+		{
+			"version": "2.0",
+			"id": 317
+		}
+	],
+	"https://ontome.net/ns/crmshortcuts/": [
+		{
+			"version": "0.1",
+			"id": 262
+		}
+	],
+	"http://www.w3.org/TR/rdf11-schema/": [
+		{
+			"version": "1.1",
+			"id": 282
+		}
+	],
+	"https://w3id.org/globalise/ontology/": [
+		{
+			"version": "1.0",
+			"id": 338
+		}
+	],
+	"https://ontology.swissartresearch.net/admo/": [
+		{
+			"version": "1.0",
+			"id": 401
+		},
+		{
+			"version": "0.9",
+			"id": 400
+		}
+	],
+	"https://ontology.swissartresearch.net/pwro/": [
+		{
+			"version": "1.0",
+			"id": 337
+		}
+	]
+}

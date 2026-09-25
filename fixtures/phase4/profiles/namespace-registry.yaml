@@ -1,6 +1,7 @@
-format_version: "1.0"
+format_version: "1.1"
 namespaces:
   - uri: https://example.org/external/
+    version: null
     ontome_namespace_id: 100
     status: active
     source: phase4 fixture
