@@ -7,10 +7,14 @@ Vous avez une ontologie RDF, par exemple un fichier RDF/XML. Vous voulez créer 
 L'outil ne transforme pas automatiquement n'importe quelle ontologie en XML OntoME. Il fait un travail contrôlé en trois temps :
 
 1. Il lit l'ontologie et relève tout ce qu'elle contient.
-2. Il vérifie que chaque information à importer a une traduction OntoME explicitement décidée.
+2. Il vérifie que chaque information à publier a une règle de transformation explicitement décidée.
 3. Il génère et valide le XML seulement lorsque ces décisions sont complètes.
 
-L'objectif est d'éviter un import XML qui invente des labels, des langues, des identifiants, des domaines, des ranges ou des références externes.
+L'objectif est d'éviter un XML d'import qui invente des labels, des langues, des identifiants, des domaines, des ranges ou des références externes.
+
+L'outil ne réalise pas un alignement sémantique entre l'ontologie source et OntoME. Il publie les classes et propriétés de la source dans le nouveau namespace OntoME décrit par le projet d'import. Lorsqu'une ressource source référence un terme d'un namespace déjà présent dans OntoME, le XML produit une référence technique vers ce namespace et cet identifiant de terme. Par exemple, une sous-classe de `.../E89_Propositional_Object` peut devenir une référence à `E89` avec l'attribut `referenceNamespace` correspondant au namespace OntoME de la version CRM concernée.
+
+Le logiciel emploie historiquement le mot technique `mapping` dans les noms de fichiers, les commandes et le classeur, par exemple `mapping-generation.yaml` et `mapping.xlsx`. Dans ce guide, il désigne uniquement un ensemble de règles déclaratives de transformation RDF-vers-XML et de décisions de publication. Il ne désigne jamais un alignement entre des concepts de l'ontologie source et des concepts OntoME.
 
 ## Ce que l'outil fait et ne fait pas
 
@@ -19,7 +23,7 @@ L'outil sait :
 - lire une source Turtle, RDF/XML ou N-Triples ;
 - inventorier classes, propriétés, labels, littéraux, langues, datatypes et blank nodes ;
 - signaler les constructions RDF/OWL/SKOS inconnues ou hors périmètre ;
-- créer des classes et propriétés OntoME lorsque leur mapping est explicite ;
+- créer des classes et propriétés dans le namespace OntoME cible lorsque leurs règles de transformation sont explicites ;
 - produire un XML déterministe, une trace de provenance et des rapports ;
 - vérifier le XML contre le XSD OntoME fourni avec l'outil.
 
@@ -27,20 +31,20 @@ La liste précise des assertions RDF/RDFS/OWL/SKOS acceptées et de celles qui b
 
 L'outil ne sait pas :
 
-- deviner quelle classe RDF doit devenir quelle entité OntoME ;
-- inventer un identifiant ou un label à partir d'une URI ;
+- décider quelles ressources RDF publier, ni quelles ressources exclure ;
+- deviner une règle d'identification ou inventer un label ;
 - choisir à votre place une langue, un domaine ou un range ;
 - convertir les restrictions OWL, cardinalités, unions, intersections, chaînes de propriétés, individus ou propriétés d'annotation ;
 - guider les décisions par un questionnaire interactif.
 
-Autrement dit : vous fournissez l'ontologie et les décisions d'import ; l'outil contrôle ces décisions et fabrique un XML fiable.
+Autrement dit : vous fournissez l'ontologie, le périmètre de publication et les règles de transformation ; l'outil contrôle ces décisions et fabrique un XML fiable.
 
 ```mermaidjs
 flowchart TD
     O([Vous installez l'outil<br/>une seule fois])
     A([Vous choisissez une ontologie RDF<br/>pour un projet d'import])
     P[/"Vous lancez init : l'outil crée<br/>un espace de travail pour ce projet"/]
-    B[/"L'outil réalise l'audit<br/>et crée le classeur de mapping"/]
+    B[/"L'outil réalise l'audit<br/>et crée le classeur de décisions"/]
     C[[Inventaire RDF, résumé<br/>et classeur XLSX]]
     D([L'équipe travaille dans le classeur XLSX])
     E([Discussion et décisions d'import])
@@ -197,18 +201,18 @@ Le XSD OntoME est livré avec l'outil. Vous n'avez pas à chercher ou copier un 
 
 ### Les décisions d'import, après l'audit
 
-Le mapping de génération est le fichier qui décrit votre logique métier. Il répond notamment à ces questions :
+Le profil de transformation de génération est nommé techniquement `mapping-generation.yaml`. Il décrit les règles de publication décidées pour votre import. Il répond notamment à ces questions :
 
-- Quelles URI source deviennent des classes OntoME ?
-- Quelles URI source deviennent des propriétés objet, datatype ou RDF ?
+- Quelles URI source deviennent des classes dans le namespace OntoME cible ?
+- Quelles URI source deviennent des propriétés objet, datatype ou RDF dans ce namespace ?
 - Quel prédicat fournit le label ?
-- Comment calculer l'identifiant local à partir d'une URI source ?
+- Quelle règle explicite fournit l'identifiant local : suffixe d'URI, capture regex ou valeur littérale d'un prédicat ?
 - Quel commentaire ou scope note devient une note XML ?
 - Quelle relation RDF devient `subClassOf`, `inverseOf` ou `hasRange` ?
-- Quelle URI externe correspond à quel namespace OntoME et quel identifiant ?
-- Quelle décision approuvée justifie un mapping, une exclusion ou une exception éditoriale ?
+- Quelle règle transforme une URI externe en référence technique vers un namespace OntoME existant et un identifiant de terme ?
+- Quelle décision approuvée justifie une règle de transformation, une exclusion ou une exception éditoriale ?
 
-Vous ne devez pas répondre à ces questions avant le premier audit. Le rapport d'audit donne la liste exacte des éléments sur lesquels l'équipe doit se prononcer.
+Vous ne devez pas répondre à ces questions avant le premier audit. Le rapport d'audit donne la liste exacte des éléments sur lesquels l'équipe doit se prononcer. Il ne demande pas de décider d'un alignement sémantique avec OntoME : les ressources sélectionnées sont publiées dans le namespace cible.
 
 La syntaxe complète est dans [Configuration Guide](configuration.md).
 
@@ -239,9 +243,9 @@ Cette commande utilise exactement le manifest indiqué après `--manifest`. Elle
 
 L'audit peut se terminer avec le code `0` tout en signalant des blocages. C'est normal : il a terminé son analyse. Travaillez ensuite dans le classeur, pas dans la liste détaillée du Markdown.
 
-### 2. Compléter le mapping
+### 2. Compléter les règles de transformation
 
-Le classeur distingue les classes, propriétés, références externes, exceptions éditoriales, journal de décisions, métadonnées et règles. Modifiez seulement les feuilles indiquées par la page `SUMMARY`; les autres feuilles sont des diagnostics dérivés. Après les décisions de l'équipe, contrôlez-le puis compilez les YAML utilisés par la génération :
+Le classeur, dont le nom de fichier peut être `mapping.xlsx`, distingue les classes, propriétés, références externes, exceptions éditoriales, journal de décisions, métadonnées et règles. Il sert à revoir les règles de publication et les exceptions, pas à réaliser un alignement sémantique. Modifiez seulement les feuilles indiquées par la page `SUMMARY`; les autres feuilles sont des diagnostics dérivés. Après les décisions de l'équipe, contrôlez-le puis compilez les YAML utilisés par la génération :
 
 ```bash
 ontome-importer assist check \
@@ -280,11 +284,21 @@ ontome-importer assist export \
   --output decisions/mapping-assistant.xlsx
 ```
 
-Sans catalogue, le classeur liste les références externes détectées dans `EXTERNAL_USAGE`. Ajouter une règle dans `EXTERNAL_REFERENCE_RULES` lorsque l'identifiant est dérivable, ou une entrée dans `EXTERNAL_EXCEPTIONS` pour un cas exact.
+Sans catalogue, le classeur liste les références externes détectées dans `EXTERNAL_USAGE`. Ajouter une règle dans `EXTERNAL_REFERENCE_RULES` lorsque l'identifiant est dérivable, ou une entrée dans `EXTERNAL_EXCEPTIONS` pour un cas exact. Une telle référence est technique : elle conserve dans le XML le lien vers un terme d'un namespace OntoME existant.
+
+Pour un identifiant local, choisissez une règle explicite. L'outil peut extraire un suffixe d'URI, appliquer une capture regex ou utiliser la valeur littérale unique d'un prédicat. Par exemple, si l'ontologie source porte les identifiants canoniques `F1` ou `R1` dans `skos:notation`, le profil peut définir :
+
+```yaml
+identifier_in_namespace:
+  source: literal_predicate
+  predicate: http://www.w3.org/2004/02/skos/core#notation
+```
+
+Cette règle ne signifie pas que toute `skos:notation` doit devenir un identifiant OntoME. Elle l'autorise uniquement pour les ressources couvertes par cette règle de transformation. La génération exige alors exactement un littéral non vide et en conserve la provenance.
 
 Pour chaque blocage en portée, décider de l'une des actions suivantes :
 
-- compléter le mapping pour une information qui doit être importée ;
+- compléter une règle de transformation pour une information qui doit être publiée ;
 - corriger la source RDF si elle est incomplète ou contradictoire ;
 - exclure explicitement une information hors périmètre, avec une justification ;
 - déclarer une règle ou une exception externe si la référence doit être conservée.
@@ -295,7 +309,7 @@ Une génération ne peut pas continuer si une classe n'a pas de label avec langu
 
 ### 3. Générer
 
-Lorsque le mapping de génération est complet :
+Lorsque le profil de transformation de génération est complet :
 
 ```bash
 ontome-importer generate \
@@ -304,7 +318,7 @@ ontome-importer generate \
   --workbook decisions/mapping.xlsx
 ```
 
-Cette commande relit la source, refait l'audit, résout le mapping, écrit le XML et le valide contre le XSD OntoME.
+Cette commande relit la source, refait l'audit, applique les règles de transformation, écrit le XML et le valide contre le XSD OntoME.
 
 En succès, elle écrit :
 
@@ -340,7 +354,7 @@ Le XML et ses rapports sont prêts à transmettre seulement lorsque `build/impor
 | --- | --- | --- |
 | `0` | La commande a réussi. | Passer à l'étape suivante ou archiver le résultat et ses rapports. |
 | `2` | Un fichier requis, la source, le profil, le XSD ou la destination ne peut pas être utilisé. | Corriger le chemin ou le fichier signalé dans le terminal. |
-| `3` | Une décision de mapping ou une validation bloque le résultat. | Lire `audit.md`, `generation-audit.json` ou `validation.json`. |
+| `3` | Une règle de transformation, une décision ou une validation bloque le résultat. | Lire `audit.md`, `generation-audit.json` ou `validation.json`. |
 
 ## Ce qu'il faut conserver
 
@@ -349,7 +363,7 @@ Pour qu'un import soit rejouable, conserver ensemble :
 - la source RDF ;
 - les deux manifests ;
 - les cinq profils ;
-- le classeur de décisions ou, à défaut, son journal compilé dans le mapping ;
+- le classeur de décisions ou, à défaut, son journal compilé dans le profil `mapping-generation.yaml` ;
 - le XML généré ;
 - la trace de génération ;
 - les audits ;
