@@ -6,6 +6,7 @@ import pytest
 
 from ontome_importer.cli import main
 from ontome_importer import cli
+from ontome_importer.ontome_catalog import fetch_target_namespace
 from ontome_importer.profiles import load_audit_profiles, load_generation_profiles, verify_capability_xsd
 
 
@@ -151,3 +152,30 @@ def test_saved_target_export_is_checked_before_audit(tmp_path):
     catalog.write_bytes(catalog.read_bytes() + b"\n")
     assert main(["audit", "--manifest", str(workspace / "config/audit.yaml"), "--output-dir", str(workspace / "build/audit")]) == 2
     assert not (workspace / "build/audit/audit.json").exists()
+
+
+def test_init_accepts_target_export_without_ontology_when_uri_is_explicit(tmp_path, monkeypatch):
+    class Response:
+        def __enter__(self):
+            return self
+        def __exit__(self, *_):
+            return None
+        def read(self):
+            return b'''<?xml version="1.0"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
+  <rdf:Description rdf:about="https://example.org/target/Class">
+    <rdfs:label xml:lang="en">A class</rdfs:label>
+  </rdf:Description>
+</rdf:RDF>'''
+    monkeypatch.setattr("ontome_importer.ontome_catalog.urlopen", lambda *args, **kwargs: Response())
+    monkeypatch.setattr(cli, "fetch_target_namespace", fetch_target_namespace)
+    workspace = tmp_path / "no-ontology"
+    args = ["init", "--source", str(SOURCE), "--workspace", str(workspace), "--target-ontome-namespace", "427"]
+    assert main(args) == 2
+    assert not workspace.exists()
+    assert main(args + ["--target-namespace-uri", "https://example.org/target/", "--target-label", "Example target"]) == 0
+    metadata = json.loads((workspace / "references/ontome/target-427.rdf.metadata.json").read_text())
+    assert metadata["namespace_uri"] == "https://example.org/target/"
+    assert main(["audit", "--manifest", str(workspace / "config/audit.yaml"), "--output-dir", str(workspace / "build/audit")]) == 0
+    assert load_generation_profiles(workspace / "config/generation.yaml")

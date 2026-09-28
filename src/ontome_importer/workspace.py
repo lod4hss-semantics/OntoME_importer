@@ -61,9 +61,12 @@ def initialize_workspace(
         if catalog_uri != verified.get("namespace_uri"):
             raise WorkspaceError("OntoME target URI differs from the verified export")
         source_uri = None if target_namespace_uri else _source_ontology_uri(inventory)
+        if catalog_uri is None and target_namespace_uri is None:
+            raise WorkspaceError("OntoME export has no owl:Ontology URI; provide --target-namespace-uri")
         namespace_uri = target_namespace_uri or source_uri or catalog_uri
-        if namespace_uri != catalog_uri:
+        if catalog_uri is not None and namespace_uri != catalog_uri:
             raise WorkspaceError(f"Target RDF URI {namespace_uri} does not match OntoME namespace {target_namespace_id}: {catalog_uri}")
+        verified["namespace_uri"] = namespace_uri
         labels = _source_ontology_labels(inventory, namespace_uri) or catalog_labels
         if target_label is None:
             if len(labels) != 1 or not labels[0][1]:

@@ -15,7 +15,7 @@ from ontome_importer.constructs import RELATION_FIELDS, SEMANTIC_CONSTRUCTS
 from ontome_importer.external_references import ExternalReferenceError, validate_external_reference_configuration
 from ontome_importer.package_resources import package_resource_path
 from ontome_importer.loader import load_inventory, RdfLoadError
-from ontome_importer.ontome_catalog import OntoMECatalogError, target_ontology, target_catalog_url
+from ontome_importer.ontome_catalog import OntoMECatalogError, target_ontology, target_catalog_url, verify_target_rdf
 
 
 WRITER_CLASS_FIELDS = frozenset({
@@ -136,6 +136,7 @@ def verify_target_catalog(manifest: dict[str, object], manifest_path: Path) -> N
     try:
         content = path.read_bytes()
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        verify_target_rdf(content)
         uri, _ = target_ontology(load_inventory(path, "rdfxml"))
     except (OSError, ValueError, RdfLoadError, OntoMECatalogError) as error:
         raise ProfileError(f"Cannot verify saved OntoME target: {error}") from error
@@ -144,7 +145,7 @@ def verify_target_catalog(manifest: dict[str, object], manifest_path: Path) -> N
         or metadata.get("ontome_namespace_id") != identity["ontome_namespace_id"]
         or metadata.get("namespace_uri") != identity["namespace_uri"]
         or metadata.get("url") != target_catalog_url(identity["ontome_namespace_id"])
-        or uri != identity["namespace_uri"]):
+        or (uri is not None and uri != identity["namespace_uri"])):
         raise ProfileError("Saved OntoME target differs from the manifest or its verified export")
 
 

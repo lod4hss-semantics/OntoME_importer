@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 from urllib.parse import urlsplit
 from urllib.request import urlopen
+from xml.etree import ElementTree
 
 from ontome_importer.loader import RdfLoadError, load_inventory
 from ontome_importer.package_resources import package_resource_path
@@ -122,17 +123,27 @@ def target_catalog_url(namespace_id: int) -> str:
     return f"https://ontome.net/api/namespaces-rdf-owl.rdf?namespace={namespace_id}&lang=en"
 
 
-def target_ontology(inventory: object) -> tuple[str, tuple[tuple[str, str], ...]]:
-    """Extract unambiguous ontology identity and localized labels from an RDF export."""
+def target_ontology(inventory: object) -> tuple[str | None, tuple[tuple[str, str], ...]]:
+    """Extract ontology identity when present; OntoME exports need not declare one."""
     rdf_type = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"
     owl_ontology = "http://www.w3.org/2002/07/owl#Ontology"
     label_predicate = "http://www.w3.org/2000/01/rdf-schema#label"
     subjects = {triple.subject.value for triple in inventory.triples if triple.predicate.value == rdf_type and triple.object.value == owl_ontology and triple.subject.kind == "uri"}
-    if len(subjects) != 1:
-        raise OntoMECatalogError("OntoME export must contain exactly one named owl:Ontology")
-    uri = next(iter(subjects))
+    if len(subjects) > 1:
+        raise OntoMECatalogError("OntoME export declares multiple owl:Ontology URIs")
+    uri = next(iter(subjects), None)
     labels = sorted({(triple.object.value, triple.object.language or "") for triple in inventory.triples if triple.subject.value == uri and triple.predicate.value == label_predicate and triple.object.kind == "literal"})
     return uri, tuple(labels)
+
+
+def verify_target_rdf(content: bytes) -> None:
+    """Reject non-RDF XML responses that rdflib would parse as empty graphs."""
+    try:
+        root = ElementTree.fromstring(content)
+    except ElementTree.ParseError as error:
+        raise OntoMECatalogError("OntoME target did not return valid RDF/XML") from error
+    if root.tag != "{http://www.w3.org/1999/02/22-rdf-syntax-ns#}RDF":
+        raise OntoMECatalogError("OntoME target did not return an rdf:RDF export")
 
 
 def fetch_target_namespace(namespace_id: int, destination: Path, timeout: float = 30.0) -> dict[str, object]:
@@ -146,8 +157,9 @@ def fetch_target_namespace(namespace_id: int, destination: Path, timeout: float 
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_bytes(content)
     try:
+        verify_target_rdf(content)
         inventory = load_inventory(destination, "rdfxml")
         uri, labels = target_ontology(inventory)
     except (RdfLoadError, OntoMECatalogError) as error:
-        raise OntoMECatalogError(f"OntoME target {namespace_id} has no usable ontology export: {error}") from error
+        raise OntoMECatalogError(f"OntoME target {namespace_id} has no usable ontology export at {url}: {error}") from error
     return {"ontome_namespace_id": namespace_id, "namespace_uri": uri, "labels": [{"value": value, "lang": lang} for value, lang in labels], "url": url, "sha256": hashlib.sha256(content).hexdigest(), "verified_at": datetime.now(timezone.utc).isoformat()}
