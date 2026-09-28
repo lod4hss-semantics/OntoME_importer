@@ -9,11 +9,9 @@ from pathlib import Path
 import os
 import shutil
 import tempfile
-from collections.abc import Callable
 from urllib.parse import urlparse
 
 from ontome_importer.loader import load_inventory
-from ontome_importer.ontome_catalog import target_ontology
 from ontome_importer.profiles import load_audit_profiles, verify_capability_xsd
 
 
@@ -35,8 +33,6 @@ def initialize_workspace(
     target_label_lang: str | None,
     target_version: str | None,
     target_namespace_id: int,
-    target_input: str,
-    fetch_target: Callable[[int, Path], dict[str, object]],
 ) -> str:
     if not source.is_file():
         raise WorkspaceError(f"Source RDF file does not exist: {source}")
@@ -52,22 +48,11 @@ def initialize_workspace(
         shutil.copyfile(source, copied_source)
         checksum = hashlib.sha256(copied_source.read_bytes()).hexdigest()
         inventory = load_inventory(copied_source, format_name)
-        catalog_relative = f"../references/ontome/target-{target_namespace_id}.rdf"
-        catalog_path = staging / "references" / "ontome" / f"target-{target_namespace_id}.rdf"
-        verified = fetch_target(target_namespace_id, catalog_path)
-        if verified.get("ontome_namespace_id") != target_namespace_id or verified.get("sha256") != hashlib.sha256(catalog_path.read_bytes()).hexdigest():
-            raise WorkspaceError("OntoME target verification is inconsistent with the downloaded RDF")
-        catalog_uri, catalog_labels = target_ontology(load_inventory(catalog_path, "rdfxml"))
-        if catalog_uri != verified.get("namespace_uri"):
-            raise WorkspaceError("OntoME target URI differs from the verified export")
         source_uri = None if target_namespace_uri else _source_ontology_uri(inventory)
-        if catalog_uri is None and target_namespace_uri is None:
-            raise WorkspaceError("OntoME export has no owl:Ontology URI; provide --target-namespace-uri")
-        namespace_uri = target_namespace_uri or source_uri or catalog_uri
-        if catalog_uri is not None and namespace_uri != catalog_uri:
-            raise WorkspaceError(f"Target RDF URI {namespace_uri} does not match OntoME namespace {target_namespace_id}: {catalog_uri}")
-        verified["namespace_uri"] = namespace_uri
-        labels = _source_ontology_labels(inventory, namespace_uri) or catalog_labels
+        namespace_uri = target_namespace_uri or source_uri
+        if namespace_uri is None or not _is_uri(namespace_uri):
+            raise WorkspaceError("Target RDF URI is absent or invalid; provide --target-namespace-uri")
+        labels = _source_ontology_labels(inventory, namespace_uri) or _unambiguous_source_ontology_labels(inventory)
         if target_label is None:
             if len(labels) != 1 or not labels[0][1]:
                 raise WorkspaceError("Target label is absent or ambiguous; provide --target-label and --target-label-lang")
@@ -85,9 +70,6 @@ def initialize_workspace(
             scope_prefixes = [namespace_uri]
         if not all(_is_uri(value) for value in scope_prefixes):
             raise WorkspaceError("Every --scope-uri-prefix must be an absolute URI")
-        verified["input"] = target_input
-        (catalog_path.with_suffix(".rdf.metadata.json")).write_text(json.dumps(verified, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
         profiles = staging / "config" / "profiles"
         profiles.mkdir(parents=True)
         _write_template("templates/audit/capability-1.1.yaml", profiles / "capability-audit.yaml")
@@ -96,8 +78,8 @@ def initialize_workspace(
         (profiles / "mapping-audit.yaml").write_text(_audit_mapping(scope_prefixes), encoding="utf-8")
         (profiles / "mapping-generation.yaml").write_text(_generation_mapping(scope_prefixes), encoding="utf-8")
         config = staging / "config"
-        (config / "audit.yaml").write_text(_audit_manifest(source_name, format_name, checksum, namespace_uri, target_namespace_id, catalog_relative, str(verified["sha256"])), encoding="utf-8")
-        (config / "generation.yaml").write_text(_generation_manifest(source_name, format_name, checksum, namespace_uri, target_label, target_label_lang, target_version, target_namespace_id, catalog_relative, str(verified["sha256"])), encoding="utf-8")
+        (config / "audit.yaml").write_text(_audit_manifest(source_name, format_name, checksum, namespace_uri, target_namespace_id), encoding="utf-8")
+        (config / "generation.yaml").write_text(_generation_manifest(source_name, format_name, checksum, namespace_uri, target_label, target_label_lang, target_version, target_namespace_id), encoding="utf-8")
         (staging / "build").mkdir()
         (staging / "README.md").write_text(_workspace_readme(source_name, target_namespace_id, namespace_uri), encoding="utf-8")
 
@@ -130,7 +112,7 @@ def _write_template(template: str, destination: Path) -> None:
     destination.write_text(resources.files("ontome_importer").joinpath(template).read_text(encoding="utf-8"), encoding="utf-8")
 
 
-def _audit_manifest(source_name: str, source_format: str, checksum: str, namespace_uri: str, namespace_id: int, catalog: str, catalog_sha: str) -> str:
+def _audit_manifest(source_name: str, source_format: str, checksum: str, namespace_uri: str, namespace_id: int) -> str:
     return f'''# Created by ontome-importer init.
 format_version: "1.2"
 source:
@@ -140,8 +122,6 @@ source:
 target:
   namespace_uri: {_yaml_string(namespace_uri)}
   ontome_namespace_id: {namespace_id}
-  catalog: {_yaml_string(catalog)}
-  catalog_sha256: {catalog_sha}
 profiles:
   capability: profiles/capability-audit.yaml
   namespace_registry: profiles/namespace-registry.yaml
@@ -150,7 +130,7 @@ strict: true
 '''
 
 
-def _generation_manifest(source_name: str, source_format: str, checksum: str, namespace_uri: str, target_label: str, target_label_lang: str, target_version: str | None, namespace_id: int, catalog: str, catalog_sha: str) -> str:
+def _generation_manifest(source_name: str, source_format: str, checksum: str, namespace_uri: str, target_label: str, target_label_lang: str, target_version: str | None, namespace_id: int) -> str:
     version_line = f"  version: {_yaml_string(target_version)}\n" if target_version else ""
     return f'''# Created by ontome-importer init.
 format_version: "1.1"
@@ -161,8 +141,6 @@ source:
 target:
   namespace_uri: {_yaml_string(namespace_uri)}
   ontome_namespace_id: {namespace_id}
-  catalog: {_yaml_string(catalog)}
-  catalog_sha256: {catalog_sha}
   labels:
     - lang: {_yaml_string(target_label_lang)}
       value: {_yaml_string(target_label)}
@@ -202,7 +180,7 @@ def _workspace_readme(source_name: str, namespace_id: int, namespace_uri: str) -
     return f'''# Espace de travail d'import
 
 Votre source RDF copiée est `source/{source_name}`.
-Namespace/version OntoME cible : https://ontome.net/namespace/{namespace_id} (`{namespace_uri}`).
+Namespace/version OntoME cible : ID {namespace_id} (`{namespace_uri}`).
 
 ## Prochaine étape : audit
 
@@ -248,3 +226,12 @@ def _source_ontology_uri(inventory: object) -> str | None:
 
 def _source_ontology_labels(inventory: object, uri: str) -> tuple[tuple[str, str], ...]:
     return tuple(sorted({(triple.object.value, triple.object.language or "") for triple in inventory.triples if triple.subject.value == uri and triple.predicate.value == "http://www.w3.org/2000/01/rdf-schema#label" and triple.object.kind == "literal"}))
+
+
+def _unambiguous_source_ontology_labels(inventory: object) -> tuple[tuple[str, str], ...]:
+    """Use the source's sole labeled ontology when the selected URI has no label."""
+    rdf_type = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"
+    owl_ontology = "http://www.w3.org/2002/07/owl#Ontology"
+    uris = {triple.subject.value for triple in inventory.triples if triple.subject.kind == "uri" and triple.predicate.value == rdf_type and triple.object.value == owl_ontology}
+    labeled = [labels for uri in uris if (labels := _source_ontology_labels(inventory, uri))]
+    return labeled[0] if len(labeled) == 1 else ()

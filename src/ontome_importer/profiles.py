@@ -14,8 +14,6 @@ from jsonschema import Draft202012Validator, FormatChecker
 from ontome_importer.constructs import RELATION_FIELDS, SEMANTIC_CONSTRUCTS
 from ontome_importer.external_references import ExternalReferenceError, validate_external_reference_configuration
 from ontome_importer.package_resources import package_resource_path
-from ontome_importer.loader import load_inventory, RdfLoadError
-from ontome_importer.ontome_catalog import OntoMECatalogError, target_ontology, target_catalog_url, verify_target_rdf
 
 
 WRITER_CLASS_FIELDS = frozenset({
@@ -51,7 +49,6 @@ class GenerationProfiles:
 def load_audit_profiles(manifest_path: str | Path) -> AuditProfiles:
     manifest_file = Path(manifest_path)
     manifest = _load_and_validate(manifest_file, "schemas/config/import-manifest-1.1.schema.json")
-    verify_target_catalog(manifest, manifest_file)
     base = manifest_file.parent
     profiles = manifest["profiles"]
     assert isinstance(profiles, dict)
@@ -69,7 +66,6 @@ def load_generation_profiles(manifest_path: str | Path) -> GenerationProfiles:
     """Load complete generation profiles with mapping 7.0."""
     manifest_file = Path(manifest_path)
     manifest = _load_and_validate(manifest_file, "schemas/config/import-manifest.schema.json")
-    verify_target_catalog(manifest, manifest_file)
     base = manifest_file.parent
     profiles = manifest["profiles"]
     assert isinstance(profiles, dict)
@@ -121,32 +117,7 @@ def target_identity(manifest: dict[str, object]) -> dict[str, object] | None:
     target = manifest["target"]
     if "ontome_namespace_id" not in target:
         return None
-    if "catalog_sha256" not in target or "catalog" not in target:
-        raise ProfileError("Target OntoME namespace ID requires a verified catalog and checksum")
-    return {"ontome_namespace_id": target["ontome_namespace_id"], "namespace_uri": target["namespace_uri"], "catalog_sha256": target["catalog_sha256"]}
-
-
-def verify_target_catalog(manifest: dict[str, object], manifest_path: Path) -> None:
-    identity = target_identity(manifest)
-    if identity is None:
-        return  # Versioned pre-target manifests remain readable for existing fixtures.
-    target = manifest["target"]
-    path = manifest_path.parent / str(target["catalog"])
-    metadata_path = path.with_suffix(path.suffix + ".metadata.json")
-    try:
-        content = path.read_bytes()
-        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-        verify_target_rdf(content)
-        uri, _ = target_ontology(load_inventory(path, "rdfxml"))
-    except (OSError, ValueError, RdfLoadError, OntoMECatalogError) as error:
-        raise ProfileError(f"Cannot verify saved OntoME target: {error}") from error
-    if (hashlib.sha256(content).hexdigest() != identity["catalog_sha256"]
-        or metadata.get("sha256") != identity["catalog_sha256"]
-        or metadata.get("ontome_namespace_id") != identity["ontome_namespace_id"]
-        or metadata.get("namespace_uri") != identity["namespace_uri"]
-        or metadata.get("url") != target_catalog_url(identity["ontome_namespace_id"])
-        or (uri is not None and uri != identity["namespace_uri"])):
-        raise ProfileError("Saved OntoME target differs from the manifest or its verified export")
+    return {"ontome_namespace_id": target["ontome_namespace_id"], "namespace_uri": target["namespace_uri"]}
 
 
 def verify_capability_xsd(capability: dict[str, object]) -> Path:

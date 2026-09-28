@@ -127,7 +127,7 @@ Un projet d'import regroupe une source RDF, les décisions prises par l'équipe 
 
 Vous pouvez lancer `init` depuis n'importe quel dossier du terminal. Les options `--source` et `--workspace` indiquent explicitement où se trouvent le RDF et le nouveau dossier à créer. Les chemins absolus, comme dans l'exemple suivant, évitent toute ambiguïté.
 
-Avant `init`, créez dans OntoME le namespace ou la version cible. Copiez son ID ou l'URL de sa page. `init` vérifie l'existence de cette cible via l'export RDF OntoME ; l'ID est une donnée d'entrée obligatoire, jamais déduit de l'ontologie source.
+Avant `init`, créez dans OntoME le namespace ou la version cible. Copiez son ID ou l'URL de sa page. L'ID est une donnée d'entrée obligatoire, jamais déduit de l'ontologie source. `init` n'interroge pas OntoME pour vérifier la cible.
 
 Exemple avec un RDF/XML :
 
@@ -143,9 +143,9 @@ ontome-importer init \
 
 `--workspace` est le nouveau dossier que l'outil doit créer. Il doit ne pas encore exister. L'outil refuse d'écraser un import existant.
 
-`--target-ontome-namespace` accepte l'ID positif (`123`) ou une URL de page `https://ontome.net/namespace/123`. Si l'option manque, le terminal demande cette valeur ; en mode non interactif, elle est obligatoire. L'outil conserve une copie datée par son checksum de l'export RDF de la cible dans `references/ontome/`, et vérifie que son URI RDF correspond à celle du projet. Une cible inaccessible ou incohérente empêche la création du workspace. Cette vérification n'atteste pas vos droits de soumission dans OntoME.
+`--target-ontome-namespace` accepte l'ID positif (`123`) ou une URL de page `https://ontome.net/namespace/123`. Si l'option manque, le terminal demande cette valeur ; en mode non interactif, elle est obligatoire. L'ID est enregistré tel quel : assurez-vous qu'il désigne la bonne cible dans votre instance OntoME.
 
-L'URI RDF, le libellé et sa langue proviennent de la déclaration `owl:Ontology` dans la source lorsque celle-ci est non ambiguë, sinon de l'export OntoME. En cas d'ambiguïté, précisez `--target-namespace-uri`, `--target-label` et `--target-label-lang`. `owl:versionInfo` (ou à défaut `owl:versionIRI`) fournit la version si elle est unique ; `--target-version` permet de la préciser.
+L'URI RDF, le libellé et sa langue proviennent de la déclaration `owl:Ontology` dans la source lorsque celle-ci est non ambiguë. Si l'URI manque ou est ambiguë, précisez `--target-namespace-uri`. Si cette URI n'a pas de libellé, l'outil reprend le seul libellé d'ontologie disponible dans la source ; s'il manque ou est ambigu, précisez `--target-label` et `--target-label-lang`. `owl:versionInfo` (ou à défaut `owl:versionIRI`) fournit la version si elle est unique ; `--target-version` permet de la préciser.
 
 Par défaut, `--scope-uri-prefix` reprend l'URI RDF cible. Si votre ontologie utilise plusieurs préfixes à importer, répétez l'option.
 
@@ -188,9 +188,6 @@ mon-ontologie/
       namespace-registry.yaml
       mapping-audit.yaml
       mapping-generation.yaml
-  references/ontome/
-    target-123.rdf
-    target-123.rdf.metadata.json
   build/
 ```
 
@@ -200,7 +197,7 @@ Le fichier `README.md` de ce dossier répète les prochaines commandes avec les 
 | --- | --- |
 | `source/ontology.<extension-rdf>` | Copie de votre ontologie ; l'extension d'origine est conservée et c'est le RDF utilisé par l'import. |
 | `config/audit.yaml` | Fichier de départ pour la première analyse. |
-| `config/generation.yaml` | Identité de la cible OntoME vérifiée et chemins des profils de génération. |
+| `config/generation.yaml` | ID et URI déclarés de la cible OntoME et chemins des profils de génération. |
 | `capability-*.yaml` | Paramètres techniques fournis par l'outil pour le XSD OntoME. Vous ne les modifiez normalement pas au début. |
 | `namespace-registry.yaml` | Liste des namespaces OntoME externes à compléter seulement si votre RDF y fait référence. |
 | `mapping-audit.yaml` | Définit le périmètre du premier audit. |

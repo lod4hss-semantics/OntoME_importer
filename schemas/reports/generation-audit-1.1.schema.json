@@ -14,5 +14,5 @@
     "counts": {"type": "object", "additionalProperties": {"type": "integer"}}
   },
   "allOf": [{"if": {"properties": {"format_version": {"const": "1.2"}}}, "then": {"required": ["target"]}}],
-  "$defs": {"target": {"type": "object", "additionalProperties": false, "required": ["ontome_namespace_id", "namespace_uri", "catalog_sha256"], "properties": {"ontome_namespace_id": {"type": "integer", "minimum": 1}, "namespace_uri": {"type": "string", "format": "uri"}, "catalog_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}}}
+  "$defs": {"target": {"type": "object", "additionalProperties": false, "required": ["ontome_namespace_id", "namespace_uri"], "properties": {"ontome_namespace_id": {"type": "integer", "minimum": 1}, "namespace_uri": {"type": "string", "format": "uri"}, "catalog_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}}}
 }

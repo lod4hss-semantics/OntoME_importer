@@ -45,7 +45,7 @@
     "strict": {"const": true},
     "output_directory": {"type": "string", "minLength": 1}
   },
-  "allOf": [{"if": {"properties": {"format_version": {"const": "1.1"}}}, "then": {"properties": {"target": {"required": ["namespace_uri", "labels", "ontome_namespace_id", "catalog", "catalog_sha256"]}}}}],
+  "allOf": [{"if": {"properties": {"format_version": {"const": "1.1"}}}, "then": {"properties": {"target": {"required": ["namespace_uri", "labels", "ontome_namespace_id"]}}}}],
   "$defs": {
     "localized_values": {
       "type": "array", "minItems": 1,

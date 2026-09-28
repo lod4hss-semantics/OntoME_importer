@@ -20,7 +20,7 @@ from ontome_importer import __version__
 from ontome_importer.audit import audit_inventory
 from ontome_importer.external_references import ExternalReferenceError, validate_external_reference_configuration
 from ontome_importer.loader import RdfLoadError, load_inventory
-from ontome_importer.ontome_catalog import OntoMECatalogError, fetch_namespace_catalog, fetch_target_namespace, load_namespace_bindings, parse_target_namespace, resolve_namespace_binding
+from ontome_importer.ontome_catalog import OntoMECatalogError, fetch_namespace_catalog, load_namespace_bindings, parse_target_namespace, resolve_namespace_binding
 from ontome_importer.package_resources import package_resource_path
 from ontome_importer.profiles import ProfileError, load_audit_profiles, load_generation_profiles, target_identity, validate_generation_mapping, verify_capability_xsd, verify_source_checksum
 from ontome_importer.review import build_review_queue, load_session, new_session, record_choice, save_session, status
@@ -41,8 +41,8 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--format", choices=("turtle", "rdfxml", "ntriples"), help="RDF source format; inferred from a known extension when omitted.")
     init.add_argument("--scope-uri-prefix", action="append", help="URI prefix to include in the import scope; repeat for multiple prefixes.")
     init.add_argument("--target-ontome-namespace", help="Existing OntoME namespace/version ID or page URL; prompted when omitted in a terminal.")
-    init.add_argument("--target-namespace-uri", help="RDF namespace URI, if the ontology does not specify it.")
-    init.add_argument("--target-label", help="Target namespace label, if unavailable from RDF/OntoME.")
+    init.add_argument("--target-namespace-uri", help="RDF namespace URI, if the source ontology does not specify it unambiguously.")
+    init.add_argument("--target-label", help="Target namespace label, if unavailable from the RDF source.")
     init.add_argument("--target-label-lang", help="Language of --target-label (default: en).")
     init.add_argument("--target-version", help="Target version, if ontology versionInfo is missing or ambiguous.")
     audit = commands.add_parser("audit", help="Audit an RDF ontology and prepare a terminal review queue.")
@@ -116,11 +116,9 @@ def _run_init(args: argparse.Namespace) -> int:
             args.target_label_lang,
             args.target_version,
             namespace_id,
-            target,
-            fetch_target_namespace,
         )
         print("Workspace created.")
-        print(f"Verified OntoME target: https://ontome.net/namespace/{namespace_id}")
+        print(f"OntoME target namespace ID: {namespace_id}")
         print("Next command:")
         print(command)
         return 0

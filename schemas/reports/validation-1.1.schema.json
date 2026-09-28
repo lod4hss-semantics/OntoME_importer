@@ -6,7 +6,7 @@
   "required": ["format_version", "valid", "source", "xsd", "artifacts", "checks", "duplicate_identifiers", "unresolved_references", "count_differences", "xml_elements_without_trace", "resolved_resources_absent_from_xml", "counts"],
   "properties": {
     "format_version": {"enum": ["1.1", "1.2"]},
-    "target": {"type": "object", "additionalProperties": false, "required": ["ontome_namespace_id", "namespace_uri", "catalog_sha256"], "properties": {"ontome_namespace_id": {"type": "integer", "minimum": 1}, "namespace_uri": {"type": "string", "format": "uri"}, "catalog_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}},
+    "target": {"type": "object", "additionalProperties": false, "required": ["ontome_namespace_id", "namespace_uri"], "properties": {"ontome_namespace_id": {"type": "integer", "minimum": 1}, "namespace_uri": {"type": "string", "format": "uri"}, "catalog_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}},
     "valid": {"type": "boolean"},
     "source": {"type": "object", "required": ["file", "sha256"], "properties": {"file": {"type": "string"}, "sha256": {"type": "string"}}, "additionalProperties": false},
     "xsd": {"type": "object", "required": ["version", "sha256"], "properties": {"version": {"type": "string"}, "sha256": {"type": "string"}}, "additionalProperties": false},
