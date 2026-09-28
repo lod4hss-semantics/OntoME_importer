@@ -56,6 +56,7 @@ def build_review_queue(inventory: Inventory, report: AuditReport) -> dict[str, o
             properties.append(item)
 
     external: dict[str, set[str]] = {}
+    external_sources: dict[str, set[str]] = {}
     for triple in inventory.triples:
         if (
             triple.subject.kind == "uri"
@@ -66,13 +67,14 @@ def build_review_queue(inventory: Inventory, report: AuditReport) -> dict[str, o
             and triple.object.value not in imported_uris
         ):
             external.setdefault(triple.object.value, set()).add(triple.predicate.value)
+            external_sources.setdefault(triple.object.value, set()).add(triple.subject.value)
 
     return {
         "format_version": "1.0",
         "source_sha256": inventory.source_sha256,
         "resources": {"classes": classes, "properties": properties},
         "external_dependencies": [
-            {"uri": uri, "relation_predicates": sorted(predicates)}
+            {"uri": uri, "relation_predicates": sorted(predicates), "sources": sorted(external_sources[uri])}
             for uri, predicates in sorted(external.items())
         ],
         "dependencies": imports,
@@ -98,6 +100,11 @@ def new_session(
         {"uri": item["uri"], **({"version": item["version"]} if "version" in item else {}), "id": None, "catalog_paths": []}
         for item in queue.get("dependencies", [])  # type: ignore[union-attr]
     ]
+    dependencies.extend(
+        {"uri": item["uri"], "id": None, "catalog_paths": []}
+        for item in queue.get("external_dependencies", [])  # type: ignore[union-attr]
+        if item["uri"] not in {dependency["uri"] for dependency in dependencies}
+    )
     return {
         "format_version": "1.0",
         "created_at": timestamp,
@@ -108,6 +115,37 @@ def new_session(
         "choices": {"resources": resource_choices, "dependencies": dependencies},
         "journal": [{"at": timestamp, "action": "session_created"}],
     }
+
+
+def refresh_session(session: dict[str, object], queue: dict[str, object], *, manifest_sha256: str) -> bool:
+    """Upgrade an existing queue without discarding resource decisions or catalog choices."""
+    if session.get("queue_sha256") == _sha256(queue):
+        return False
+    updated = new_session(queue, manifest_sha256=manifest_sha256)
+    old_choices = session["choices"]
+    choices = updated["choices"]
+    assert isinstance(old_choices, dict) and isinstance(choices, dict)
+    for uri in choices["resources"]:
+        if uri in old_choices["resources"]:
+            choices["resources"][uri] = old_choices["resources"][uri]
+    previous = {item["uri"]: item for item in old_choices["dependencies"]}
+    for item in choices["dependencies"]:
+        if item["uri"] in previous:
+            item.update({key: previous[item["uri"]][key] for key in ("id", "catalog_paths") if key in previous[item["uri"]]})
+    session["queue"] = updated["queue"]
+    session["queue_sha256"] = updated["queue_sha256"]
+    session["choices"] = choices
+    session["journal"].append({"at": _timestamp(None), "action": "queue_refreshed"})
+    return True
+
+
+def active_dependencies(session: dict[str, object]) -> list[dict[str, object]]:
+    choices = session["choices"]
+    queue = session["queue"]
+    assert isinstance(choices, dict) and isinstance(queue, dict)
+    external = {item["uri"]: item["sources"] for item in queue.get("external_dependencies", [])}
+    selected = {uri for uri, choice in choices["resources"].items() if choice != "exclude"}
+    return [item for item in choices["dependencies"] if item["uri"] not in external or any(uri in selected for uri in external[item["uri"]])]
 
 
 def load_session(path: str | Path) -> dict[str, object]:
@@ -149,10 +187,10 @@ def status(session: dict[str, object]) -> dict[str, object]:
     for choice in resources.values() if isinstance(resources, dict) else ():
         if choice in counts:
             counts[choice] += 1
-    dependencies = choices.get("dependencies", []) if isinstance(choices, dict) else []
+    dependencies = active_dependencies(session)
     return {
         "resources": counts,
-        "dependencies": {"total": len(dependencies), "configured": sum(bool(item.get("id") or item.get("catalog_paths")) for item in dependencies)},
+        "dependencies": {"total": len(dependencies), "configured": sum(bool(item.get("catalog_paths")) for item in dependencies)},
     }
 
 

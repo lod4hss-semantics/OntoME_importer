@@ -240,6 +240,8 @@ L'audit peut se terminer avec le code `0` tout en signalant des blocages. C'est 
 
 La revue est locale et guidée. Elle enregistre les décisions dans `decisions/review.json` sans exposer les profils techniques.
 
+`review resources` enchaîne toutes les ressources en attente et affiche les constats regroupés avant chaque décision. Utilisez `--limit N` pour limiter une séance, ou `--resource URI` pour changer une décision déjà enregistrée. Relancer `review start` recalcule les dépendances sans effacer les décisions prises.
+
 ```bash
 ontome-importer review start \
   --manifest config/generation.yaml \
@@ -263,6 +265,8 @@ ontome-importer namespaces fetch \
 ```
 
 Le catalogue exporté par OntoME fournit les identifiants canoniques dans `skos:notation`. La revue télécharge et vérifie ce catalogue après confirmation de la dépendance. Les références sont ensuite résolues automatiquement ; ne saisissez pas d'identifiant OntoME par déduction d'URI. Si une URI externe est absente du catalogue sélectionné, elle reste bloquante et le terminal indique l'URI, le namespace et la version à clarifier.
+
+Une relation vers un terme externe sans `owl:imports` crée aussi une dépendance de revue. Quand aucun catalogue OntoME connu ne permet de vérifier ce terme, `review check` liste les ressources qui l'utilisent : un binding de namespace vérifié doit être ajouté à l'outil, ou la publication des ressources concernées doit être reconsidérée. `review finalize` ne passe pas outre un terme externe non résolu.
 
 Pour un identifiant local, choisissez une règle explicite. L'outil peut extraire un suffixe d'URI, appliquer une capture regex ou utiliser la valeur littérale unique d'un prédicat. Par exemple, si l'ontologie source porte les identifiants canoniques `F1` ou `R1` dans `skos:notation`, le profil peut définir :
 

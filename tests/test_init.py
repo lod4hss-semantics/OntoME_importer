@@ -132,3 +132,20 @@ def test_init_uses_the_only_labeled_source_ontology_for_a_different_target_uri(t
     target = load_generation_profiles(workspace / "config/generation.yaml").manifest["target"]
     assert target["namespace_uri"] == "https://example.org/terms#"
     assert target["labels"] == [{"lang": "en", "value": "Example ontology"}]
+
+
+def test_review_resources_runs_all_by_default_and_allows_revisiting_a_choice(tmp_path, monkeypatch, capsys):
+    workspace = tmp_path / "review"
+    assert main(["init", "--source", str(E2E_SOURCE), "--workspace", str(workspace), "--target-ontome-namespace", "427"]) == 0
+    manifest = workspace / "config/generation.yaml"
+    session = workspace / "decisions/review.json"
+    assert main(["review", "start", "--manifest", str(manifest), "--session", str(session)]) == 0
+    monkeypatch.setattr("builtins.input", lambda _: "p")
+    assert main(["review", "resources", "--session", str(session)]) == 0
+    choices = json.loads(session.read_text())["choices"]["resources"]
+    assert all(choice == "publish" for choice in choices.values())
+    assert "Findings:" in capsys.readouterr().out
+    uri = next(iter(choices))
+    monkeypatch.setattr("builtins.input", lambda _: "e")
+    assert main(["review", "resources", "--session", str(session), "--resource", uri]) == 0
+    assert json.loads(session.read_text())["choices"]["resources"][uri] == "exclude"

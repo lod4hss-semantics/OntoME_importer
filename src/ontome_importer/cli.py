@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 from collections.abc import Sequence
 import hashlib
 import json
@@ -23,7 +24,7 @@ from ontome_importer.loader import RdfLoadError, load_inventory
 from ontome_importer.ontome_catalog import OntoMECatalogError, fetch_namespace_catalog, load_namespace_bindings, parse_target_namespace, resolve_namespace_binding
 from ontome_importer.package_resources import package_resource_path
 from ontome_importer.profiles import ProfileError, load_audit_profiles, load_generation_profiles, target_identity, validate_generation_mapping, verify_capability_xsd, verify_source_checksum
-from ontome_importer.review import build_review_queue, load_session, new_session, record_choice, save_session, status
+from ontome_importer.review import active_dependencies, build_review_queue, load_session, new_session, record_choice, refresh_session, save_session, status
 from ontome_importer.resolution import resolve_generation
 from ontome_importer.validator import validate_generation
 from ontome_importer.workspace import WorkspaceError, initialize_workspace
@@ -71,7 +72,8 @@ def build_parser() -> argparse.ArgumentParser:
     review_start.add_argument("--session", default="decisions/review.json", help="Path for the persistent review session.")
     review_resources = review_commands.add_parser("resources", help="Review pending classes and properties.")
     review_resources.add_argument("--session", default="decisions/review.json", help="Path to the review session.")
-    review_resources.add_argument("--limit", type=int, default=1, help="Maximum pending resources to review in this run.")
+    review_resources.add_argument("--limit", type=int, help="Maximum pending resources to review in this run (default: all).")
+    review_resources.add_argument("--resource", help="URI of a resource to review again and change its decision.")
     review_status = review_commands.add_parser("status", help="Show local review progress.")
     review_status.add_argument("--session", default="decisions/review.json", help="Path to the review session.")
     review_check = review_commands.add_parser("check", help="Report decisions that still block finalization.")
@@ -177,13 +179,16 @@ def _run_review(args: argparse.Namespace) -> int:
             assert isinstance(source, dict)
             inventory = load_inventory(manifest_path.parent / str(source["file"]), str(source["format"]))
             report = audit_inventory(inventory, profiles.capability, profiles.mapping, profiles.namespace_registry)
+            queue = build_review_queue(inventory, report)
             if session_path.exists():
                 session = load_session(session_path)
                 if session.get("source_sha256") != inventory.source_sha256:
                     raise ValueError("Review session does not belong to this source")
+                if refresh_session(session, queue, manifest_sha256=_hash_json(profiles.manifest)):
+                    print("Review queue refreshed; existing resource decisions retained.")
                 print(f"Review session resumed: {session_path}")
             else:
-                session = new_session(build_review_queue(inventory, report), manifest_sha256=_hash_json(profiles.manifest))
+                session = new_session(queue, manifest_sha256=_hash_json(profiles.manifest))
                 save_session(session, session_path)
                 print(f"Review session created: {session_path}")
             _configure_review_dependencies(session, session_path)
@@ -200,7 +205,8 @@ def _run_review(args: argparse.Namespace) -> int:
             pending = review_status["resources"]["pending"]
             dependencies = review_status["dependencies"]
             if pending or dependencies["configured"] != dependencies["total"]:
-                print(f"Review incomplete: {pending} resource decisions pending; {dependencies['configured']}/{dependencies['total']} dependencies configured.")
+                print(f"Review incomplete: {pending} resource decisions pending; {dependencies['configured']}/{dependencies['total']} dependencies configured. Run review start to configure dependencies, or review resources --resource URI to exclude a resource.")
+                _print_unresolved_dependencies(session)
                 return 3
             print("Review is complete.")
             return 0
@@ -213,6 +219,10 @@ def _run_review(args: argparse.Namespace) -> int:
             source = profiles.manifest["source"]
             assert isinstance(source, dict)
             inventory = load_inventory(manifest_path.parent / str(source["file"]), str(source["format"]))
+            report = audit_inventory(inventory, profiles.capability, profiles.mapping, profiles.namespace_registry)
+            if refresh_session(session, build_review_queue(inventory, report), manifest_sha256=_hash_json(profiles.manifest)):
+                save_session(session, session_path)
+                raise ValueError("Review queue changed; decisions were retained. Run review start to configure new dependencies")
             mapping, registry = _compile_review(session, inventory, profiles)
             _publish_compilation({
                 manifest_path.parent / "profiles" / "mapping-generation.yaml": _dump_yaml(mapping),
@@ -220,10 +230,16 @@ def _run_review(args: argparse.Namespace) -> int:
             })
             print("Review finalized. Internal transformation profiles were updated.")
             return 0
-        pending = [uri for uri, choice in session["choices"]["resources"].items() if choice == "pending"]
+        if args.resource and args.resource not in session["choices"]["resources"]:
+            raise ValueError(f"Unknown review resource: {args.resource}")
+        if args.limit is not None and args.limit < 1:
+            raise ValueError("--limit must be positive")
+        pending = [args.resource] if args.resource else [uri for uri, choice in session["choices"]["resources"].items() if choice == "pending"]
         for uri in pending[:args.limit]:
             resource = _review_resource(session, uri)
             print(f"\n{resource['kind']} {uri}\nLabels: {resource['labels'] or 'none'}\nFindings: {resource['finding_count']}")
+            for (category, construct), count in resource["finding_summary"]:
+                print(f"  {category} / {construct}: {count}")
             answer = input("[p]ublish, [e]xclude, [s]kip: ").strip().lower()
             choice = {"p": "publish", "e": "exclude", "s": "pending"}.get(answer)
             if choice is None:
@@ -248,29 +264,29 @@ def _review_resource(session: dict[str, object], uri: str) -> dict[str, object]:
         match = next((item for item in values if item["uri"] == uri), None)
         if match is not None:
             labels = ", ".join(f"{label['value']} [{label.get('language', '')}]" for label in match["labels"])
-            return {"kind": "Class" if kind == "classes" else "Property", "labels": labels, "finding_count": len(match["findings"])}
+            summary = Counter((item["category"], item["construct"]) for item in match["findings"])
+            return {"kind": "Class" if kind == "classes" else "Property", "labels": labels, "finding_count": len(match["findings"]), "finding_summary": sorted(summary.items())}
     raise ValueError(f"Review resource is missing from the queue: {uri}")
 
 
 def _configure_review_dependencies(session: dict[str, object], session_path: Path) -> None:
     choices = session["choices"]
     assert isinstance(choices, dict)
-    dependencies = choices["dependencies"]
-    assert isinstance(dependencies, list)
+    dependencies = active_dependencies(session)
     bindings = load_namespace_bindings()
     for dependency in dependencies:
-        if dependency.get("id") or dependency.get("catalog_paths"):
+        if dependency.get("catalog_paths"):
             continue
         uri = str(dependency["uri"])
         candidates = [item for item in bindings if uri.startswith(item.uri) and (item.version is None or item.version in uri)]
         if len(candidates) != 1:
-            print(f"Dependency requires a version selection before it can be resolved: {uri}")
+            print(f"No unique OntoME catalog is known for external term: {uri}. Review affected resources or add a verified namespace binding before finalization.")
             continue
         binding = candidates[0]
         answer = input(f"Use OntoME namespace {binding.ontome_namespace_id} for {binding.uri} version {binding.version}? [Y/n] ").strip().lower()
         if answer not in {"", "y", "yes", "o", "oui"}:
             continue
-        catalog = Path("references") / "ontome" / f"namespace-{binding.ontome_namespace_id}.rdf"
+        catalog = session_path.parent.parent / "references" / "ontome" / f"namespace-{binding.ontome_namespace_id}.rdf"
         if not catalog.exists():
             fetch_namespace_catalog(binding, catalog)
         record_choice(session, "dependency", uri, identifier=str(binding.ontome_namespace_id), catalog_paths=[str(catalog)])
@@ -283,6 +299,19 @@ def _print_review_status(value: dict[str, object]) -> None:
     print("Review status")
     print(f"Resources: {resources['publish']} publish, {resources['exclude']} exclude, {resources['pending']} pending.")
     print(f"Dependencies: {dependencies['configured']}/{dependencies['total']} configured.")
+
+
+def _print_unresolved_dependencies(session: dict[str, object]) -> None:
+    queue = session["queue"]
+    assert isinstance(queue, dict)
+    external = {item["uri"]: item.get("sources", []) for item in queue.get("external_dependencies", [])}
+    for dependency in active_dependencies(session):
+        if dependency.get("catalog_paths"):
+            continue
+        print(f"Unresolved external term: {dependency['uri']}")
+        for uri in external.get(dependency["uri"], []):
+            if session["choices"]["resources"].get(uri) != "exclude":
+                print(f"  Used by: {uri}")
 
 
 def _compile_review(session: dict[str, object], inventory: object, profiles: object) -> tuple[dict[str, object], dict[str, object]]:

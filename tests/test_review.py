@@ -3,7 +3,7 @@ import hashlib
 
 from ontome_importer.audit import AuditReport
 from ontome_importer.inventory import build_inventory
-from ontome_importer.review import build_review_queue, load_session, new_session, record_choice, save_session, status
+from ontome_importer.review import build_review_queue, load_session, new_session, record_choice, refresh_session, save_session, status
 
 
 def _inventory():
@@ -37,8 +37,8 @@ def test_build_review_queue_groups_scoped_resources_and_separates_dependencies()
     assert queue["resources"]["classes"][0]["labels"] == [{"kind": "literal", "value": "A class", "language": "en"}]
     assert [item["uri"] for item in queue["resources"]["properties"]] == ["https://example.org/source/property"]
     assert queue["external_dependencies"] == [
-        {"uri": "https://example.org/external/Parent", "relation_predicates": ["http://www.w3.org/2000/01/rdf-schema#subClassOf"]},
-        {"uri": "https://example.org/external/Range", "relation_predicates": ["http://www.w3.org/2000/01/rdf-schema#range"]},
+        {"uri": "https://example.org/external/Parent", "relation_predicates": ["http://www.w3.org/2000/01/rdf-schema#subClassOf"], "sources": ["https://example.org/source/Class"]},
+        {"uri": "https://example.org/external/Range", "relation_predicates": ["http://www.w3.org/2000/01/rdf-schema#range"], "sources": ["https://example.org/source/property"]},
     ]
     assert queue["dependencies"] == [{"uri": "https://example.org/external/ontology", "version": "https://example.org/external/ontology/1.2"}]
 
@@ -57,6 +57,23 @@ def test_session_records_choices_and_round_trips_atomically(tmp_path):
 
     loaded = load_session(path)
     assert loaded["choices"]["resources"]["https://example.org/source/Class"] == "publish"
-    assert loaded["choices"]["dependencies"] == [{"uri": "https://example.org/external/ontology", "version": "https://example.org/external/ontology/1.2", "id": "42", "catalog_paths": ["catalog/external.xml"]}]
-    assert status(loaded) == {"resources": {"exclude": 0, "pending": 1, "publish": 1}, "dependencies": {"total": 1, "configured": 1}}
+    assert loaded["choices"]["dependencies"] == [
+        {"uri": "https://example.org/external/ontology", "version": "https://example.org/external/ontology/1.2", "id": "42", "catalog_paths": ["catalog/external.xml"]},
+        {"uri": "https://example.org/external/Parent", "id": None, "catalog_paths": []},
+        {"uri": "https://example.org/external/Range", "id": None, "catalog_paths": []},
+    ]
+    assert status(loaded) == {"resources": {"exclude": 0, "pending": 1, "publish": 1}, "dependencies": {"total": 3, "configured": 1}}
     assert len(loaded["journal"]) == 3
+
+
+def test_refresh_session_retains_choices_and_tracks_only_selected_external_terms():
+    inventory = _inventory()
+    queue = build_review_queue(inventory, _report(inventory))
+    old_queue = {**queue, "external_dependencies": []}
+    session = new_session(old_queue, manifest_sha256="b" * 64)
+    record_choice(session, "resource", "https://example.org/source/Class", "publish")
+    record_choice(session, "resource", "https://example.org/source/property", "exclude")
+    assert refresh_session(session, queue, manifest_sha256="b" * 64)
+    assert session["choices"]["resources"] == {"https://example.org/source/Class": "publish", "https://example.org/source/property": "exclude"}
+    assert status(session)["dependencies"] == {"total": 2, "configured": 0}
+    assert not refresh_session(session, queue, manifest_sha256="b" * 64)
