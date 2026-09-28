@@ -5,10 +5,11 @@
   "additionalProperties": false,
   "required": ["format_version", "source", "target", "profiles", "strict"],
   "properties": {
-    "format_version": {"const": "1.1"},
+    "format_version": {"enum": ["1.1", "1.2"]},
     "source": {"type": "object", "additionalProperties": false, "required": ["file", "format"], "properties": {"file": {"type": "string", "minLength": 1}, "format": {"enum": ["turtle", "rdfxml", "ntriples"]}, "uri": {"type": "string", "format": "uri"}, "version": {"type": "string"}, "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}},
-    "target": {"type": "object", "additionalProperties": true, "required": ["namespace_uri"], "properties": {"namespace_uri": {"type": "string", "format": "uri"}}},
+    "target": {"type": "object", "additionalProperties": false, "required": ["namespace_uri"], "properties": {"namespace_uri": {"type": "string", "format": "uri"}, "ontome_namespace_id": {"type": "integer", "minimum": 1}, "catalog": {"type": "string", "minLength": 1}, "catalog_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}},
     "profiles": {"type": "object", "additionalProperties": false, "required": ["capability", "namespace_registry", "mapping"], "properties": {"capability": {"type": "string", "minLength": 1}, "namespace_registry": {"type": "string", "minLength": 1}, "mapping": {"type": "string", "minLength": 1}}},
     "strict": {"const": true}
-  }
+  },
+  "allOf": [{"if": {"properties": {"format_version": {"const": "1.2"}}}, "then": {"properties": {"target": {"required": ["namespace_uri", "ontome_namespace_id", "catalog", "catalog_sha256"]}}}}]
 }

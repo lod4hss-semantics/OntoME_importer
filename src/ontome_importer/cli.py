@@ -20,9 +20,9 @@ from ontome_importer import __version__
 from ontome_importer.audit import audit_inventory
 from ontome_importer.external_references import ExternalReferenceError, validate_external_reference_configuration
 from ontome_importer.loader import RdfLoadError, load_inventory
-from ontome_importer.ontome_catalog import OntoMECatalogError, fetch_namespace_catalog, load_namespace_bindings, resolve_namespace_binding
+from ontome_importer.ontome_catalog import OntoMECatalogError, fetch_namespace_catalog, fetch_target_namespace, load_namespace_bindings, parse_target_namespace, resolve_namespace_binding
 from ontome_importer.package_resources import package_resource_path
-from ontome_importer.profiles import ProfileError, load_audit_profiles, load_generation_profiles, validate_generation_mapping, verify_capability_xsd, verify_source_checksum
+from ontome_importer.profiles import ProfileError, load_audit_profiles, load_generation_profiles, target_identity, validate_generation_mapping, verify_capability_xsd, verify_source_checksum
 from ontome_importer.review import build_review_queue, load_session, new_session, record_choice, save_session, status
 from ontome_importer.resolution import resolve_generation
 from ontome_importer.validator import validate_generation
@@ -39,10 +39,12 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--source", required=True, help="Path to the RDF source file to copy.")
     init.add_argument("--workspace", required=True, help="New workspace directory to create.")
     init.add_argument("--format", choices=("turtle", "rdfxml", "ntriples"), help="RDF source format; inferred from a known extension when omitted.")
-    init.add_argument("--scope-uri-prefix", required=True, action="append", help="URI prefix to include in the import scope; repeat for multiple prefixes.")
-    init.add_argument("--target-namespace-uri", required=True, help="Target OntoME namespace URI for the new import.")
-    init.add_argument("--target-label", required=True, help="Label of the target OntoME namespace.")
-    init.add_argument("--target-label-lang", default="en", help="Language of --target-label (default: en).")
+    init.add_argument("--scope-uri-prefix", action="append", help="URI prefix to include in the import scope; repeat for multiple prefixes.")
+    init.add_argument("--target-ontome-namespace", help="Existing OntoME namespace/version ID or page URL; prompted when omitted in a terminal.")
+    init.add_argument("--target-namespace-uri", help="RDF namespace URI, if the ontology does not specify it.")
+    init.add_argument("--target-label", help="Target namespace label, if unavailable from RDF/OntoME.")
+    init.add_argument("--target-label-lang", help="Language of --target-label (default: en).")
+    init.add_argument("--target-version", help="Target version, if ontology versionInfo is missing or ambiguous.")
     audit = commands.add_parser("audit", help="Audit an RDF ontology and prepare a terminal review queue.")
     audit.add_argument("--manifest", required=True, help="Path to an import manifest 1.1.")
     audit.add_argument("--output-dir", required=True, help="Directory for audit outputs.")
@@ -98,20 +100,31 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def _run_init(args: argparse.Namespace) -> int:
     try:
+        target = args.target_ontome_namespace
+        if target is None:
+            if not sys.stdin.isatty():
+                raise WorkspaceError("Provide --target-ontome-namespace (an existing OntoME namespace ID or URL) when running without a terminal")
+            target = input("URL ou ID du namespace/version OntoME cible déjà créé : ").strip()
+        namespace_id = parse_target_namespace(target)
         command = initialize_workspace(
             Path(args.source),
             Path(args.workspace),
             args.format,
-            args.scope_uri_prefix,
+            args.scope_uri_prefix or [],
             args.target_namespace_uri,
             args.target_label,
             args.target_label_lang,
+            args.target_version,
+            namespace_id,
+            target,
+            fetch_target_namespace,
         )
         print("Workspace created.")
+        print(f"Verified OntoME target: https://ontome.net/namespace/{namespace_id}")
         print("Next command:")
         print(command)
         return 0
-    except (WorkspaceError, RdfLoadError, OSError, ProfileError) as error:
+    except (WorkspaceError, OntoMECatalogError, RdfLoadError, OSError, ProfileError, EOFError) as error:
         print(f"ontome-importer init: {error}", file=sys.stderr)
         return 2
 
@@ -410,7 +423,7 @@ def _run_generate(args: argparse.Namespace) -> int:
             _publish_files(output_dir, {"generation-audit.json": _json(result.audit).encode("utf-8")})
             print("ontome-importer generate: generation blocked; see generation-audit.json", file=sys.stderr)
             return 3
-        xml, trace = write_xml(result.generation, profiles.capability, xsd_path, inventory.source_sha256)
+        xml, trace = write_xml(result.generation, profiles.capability, xsd_path, inventory.source_sha256, target_identity(profiles.manifest))
         _publish_files(output_dir, {
             "import.xml": xml,
             "generation-trace.json": _json(trace).encode("utf-8"),

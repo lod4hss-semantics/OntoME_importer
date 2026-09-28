@@ -35,6 +35,7 @@ ontome-importer --help
 ontome-importer --version
 ```
 
-`init` creates a new import workspace. `audit` inventories the RDF and prepares a review queue. `review` records publication decisions locally in the terminal and compiles internal profiles. `generate` and `validate` use the complete manifest/capability 1.0 contracts. Follow the [User Guide](docs/user-guide.md) for the full `init → audit → review → generate → validate` workflow, files produced and exit codes.
+`init` creates a new import workspace. `audit` inventories the RDF and prepares a review queue. `review` records publication decisions locally in the terminal and compiles internal profiles. `generate` and `validate` use the versioned manifest and capability contracts. Follow the [User Guide](docs/user-guide.md) for the full `init → audit → review → generate → validate` workflow, files produced and exit codes.
+Create the target namespace/version in OntoME first. `init` asks for its existing ID or page URL and verifies it before creating the workspace.
 
 ## Legacy Material

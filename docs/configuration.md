@@ -16,7 +16,7 @@ Audit uses manifest 1.1, capability profile 1.1, namespace registry 1.0, and map
 
 ## Generation Profiles
 
-Generation uses manifest 1.0, capability profile 1.0, namespace registry 1.1, and an internal transformation profile 7.0 compiled by the review. The target namespace requires at least one localized label.
+New workspaces use audit manifest 1.2 and generation manifest 1.1, with the existing capability profiles, namespace registry 1.1, and an internal transformation profile 7.0 compiled by the review. The target namespace requires an OntoME ID, the matching RDF URI, a localized label and a cached, checksummed OntoME export. Earlier manifests remain readable for existing fixtures.
 
 ## Decision Journal
 

@@ -106,7 +106,7 @@ def resolve_generation(
     rdf_audit = audit_inventory(inventory, capability, mapping, registry)
     findings = [dict(item, phase="rdf_audit") for item in rdf_audit.findings]
     if not rdf_audit.to_dict()["strict_ok"]:
-        return ResolutionResult(None, _audit_document(inventory, capability, findings))
+        return ResolutionResult(None, _audit_document(inventory, capability, findings, manifest))
 
     triples_by_subject: dict[RdfTerm, list[InventoryTriple]] = {}
     for triple in inventory.triples:
@@ -164,7 +164,7 @@ def resolve_generation(
             resolved_properties.append(ResolvedProperty(resource, _type_triple_ids(source_triples), rule["id"], target["property_kind"], identifiers[resource].value, identifiers[resource].triple_ids, identifiers[resource].origin, _identifier_uri(target, resource), labels, relations, domain, range_, texts))
 
     if any(finding["status"] in {"blocked", "invalid"} for finding in findings):
-        return ResolutionResult(None, _audit_document(inventory, capability, findings))
+        return ResolutionResult(None, _audit_document(inventory, capability, findings, manifest))
     target = manifest["target"]
     namespace = ResolvedNamespace(
         tuple(ResolvedText(item["value"], item["lang"], RdfTerm("uri", str(target["namespace_uri"])), (), "manifest", "configuration") for item in target["labels"]),
@@ -173,7 +173,7 @@ def resolve_generation(
         tuple(sorted(used_namespaces)),
     )
     generation = ResolvedGeneration(namespace, tuple(sorted(resolved_classes, key=lambda item: item.identifier)), tuple(sorted(resolved_properties, key=lambda item: item.identifier)))
-    return ResolutionResult(generation, _audit_document(inventory, capability, findings))
+    return ResolutionResult(generation, _audit_document(inventory, capability, findings, manifest))
 
 
 def _local_identifier(resource: RdfTerm, target: dict[str, object], triples: list[InventoryTriple], rule: str, findings: list[dict[str, object]]) -> ResolvedIdentifier | None:
@@ -326,7 +326,9 @@ def _issue(status: str, resource: RdfTerm, triple_ids: tuple[str, ...], rule: st
     return result
 
 
-def _audit_document(inventory: Inventory, capability: dict[str, object], findings: list[dict[str, object]]) -> dict[str, object]:
+def _audit_document(inventory: Inventory, capability: dict[str, object], findings: list[dict[str, object]], manifest: dict[str, object]) -> dict[str, object]:
     counts = Counter(item["status"] for item in findings)
     xsd = capability["xsd"]
-    return {"format_version": "1.1", "source": {"file": inventory.source_file, "sha256": inventory.source_sha256}, "xsd": {"version": xsd["version"], "sha256": xsd["sha256"]}, "strict_ok": not any(item["status"] in {"blocked", "invalid", "configured"} for item in findings), "findings": findings, "counts": dict(sorted(counts.items()))}
+    from ontome_importer.profiles import target_identity
+    identity = target_identity(manifest)
+    return {"format_version": "1.2" if identity else "1.1", "source": {"file": inventory.source_file, "sha256": inventory.source_sha256}, "xsd": {"version": xsd["version"], "sha256": xsd["sha256"]}, "strict_ok": not any(item["status"] in {"blocked", "invalid", "configured"} for item in findings), "findings": findings, "counts": dict(sorted(counts.items())), **({"target": identity} if identity else {})}

@@ -15,7 +15,7 @@ class XmlGenerationError(ValueError):
     """The resolved model cannot be serialized as a valid OntoME XML import."""
 
 
-def write_xml(generation: ResolvedGeneration, capability: dict[str, object], xsd_path: Path, source_sha256: str) -> tuple[bytes, dict[str, object]]:
+def write_xml(generation: ResolvedGeneration, capability: dict[str, object], xsd_path: Path, source_sha256: str, target: dict[str, object] | None = None) -> tuple[bytes, dict[str, object]]:
     root = etree.Element("namespace")
     entries: list[dict[str, object]] = []
     namespace = generation.namespace
@@ -71,7 +71,7 @@ def write_xml(generation: ResolvedGeneration, capability: dict[str, object], xsd
     for entry in entries:
         entry["id"] = "trace-" + hashlib.sha256(json.dumps(entry, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     xsd = capability["xsd"]
-    trace = {"format_version": "1.2", "source_sha256": source_sha256, "xsd": {"version": xsd["version"], "sha256": xsd["sha256"]}, "xml_sha256": xml_sha256, "entries": entries}
+    trace = {"format_version": "1.3" if target else "1.2", "source_sha256": source_sha256, "xsd": {"version": xsd["version"], "sha256": xsd["sha256"]}, "xml_sha256": xml_sha256, "entries": entries, **({"target": target} if target else {})}
     return xml, trace
 
 

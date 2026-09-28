@@ -59,6 +59,7 @@ def audit_inventory(
     observations = []
     triples = {triple.id: triple for triple in inventory.triples}
     occurrences = list(detect_constructs(inventory))
+    ontology_uris = {triple.subject.value for triple in inventory.triples if triple.subject.kind == "uri" and triple.predicate.value == f"{RDF}type" and triple.object.value == f"{OWL}Ontology"}
     for triple in inventory.triples:
         if triple.object.kind != "uri" or _is_local(triple.object, inventory, mapping):
             continue
@@ -75,6 +76,11 @@ def audit_inventory(
         if status is None and not _is_standard(triple.object):
             occurrences.append(ConstructOccurrence("unknown_namespace", triple.subject, (triple.id,)))
     for occurrence in sorted(set(occurrences), key=lambda item: item.id):
+        if occurrence.resource.kind == "uri" and occurrence.resource.value in ontology_uris and all(
+            triples[triple_id].predicate.value in {f"{RDF}type", f"{RDFS}label", f"{RDFS}comment", f"{OWL}imports", f"{OWL}versionIRI", f"{OWL}versionInfo"}
+            for triple_id in occurrence.triple_ids
+        ):
+            continue
         base = _base_record(occurrence, triples, inventory.source_file)
         effective_resource = occurrence.scope_resource or occurrence.resource
         if not _in_scope(effective_resource, inventory, mapping):

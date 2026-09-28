@@ -13,7 +13,7 @@ from ontome_importer.inventory import Inventory
 from ontome_importer.external_references import ExternalReferenceError, resolve_external_reference
 from ontome_importer.loader import load_inventory
 from ontome_importer.package_resources import package_resource_path
-from ontome_importer.profiles import ProfileError, load_generation_profiles, verify_capability_xsd, verify_source_checksum
+from ontome_importer.profiles import ProfileError, load_generation_profiles, target_identity, verify_capability_xsd, verify_source_checksum
 from ontome_importer.resolution import resolve_generation
 from ontome_importer.xml_writer import XmlGenerationError, write_xml
 
@@ -26,6 +26,7 @@ def validate_generation(manifest_path: Path, xml_path: Path, trace_path: Path, a
     source_path = manifest_path.parent / str(source["file"])
     verify_source_checksum(profiles.manifest, source_path)
     inventory = load_inventory(source_path, str(source["format"]))
+    target = target_identity(profiles.manifest)
     checks: list[dict[str, object]] = []
     duplicates: list[str] = []
     unresolved: list[str] = []
@@ -59,10 +60,14 @@ def validate_generation(manifest_path: Path, xml_path: Path, trace_path: Path, a
 
     xml_sha256 = hashlib.sha256(xml_bytes).hexdigest() if xml_bytes is not None else ""
     if isinstance(trace, dict) and trace_valid:
+        if target is not None:
+            check("trace_target_matches_manifest", trace.get("target") == target, "Trace target differs from verified OntoME target.")
         check("xml_sha256_matches_trace", trace["xml_sha256"] == xml_sha256, "XML checksum differs from generation trace.", "generation-trace.json#/xml_sha256")
         check("trace_source_sha256_matches_source", trace["source_sha256"] == inventory.source_sha256, "Trace source checksum differs from source.")
         check("trace_xsd_matches_capability", trace["xsd"] == _xsd_identity(profiles.capability), "Trace XSD identity differs from capability profile.")
     if isinstance(audit, dict) and audit_valid:
+        if target is not None:
+            check("audit_target_matches_manifest", audit.get("target") == target, "Audit target differs from verified OntoME target.")
         check("audit_source_sha256_matches_source", audit["source"]["sha256"] == inventory.source_sha256, "Audit source checksum differs from source.")
         check("audit_xsd_matches_capability", audit["xsd"] == _xsd_identity(profiles.capability), "Audit XSD identity differs from capability profile.")
         check("generation_audit_strict_ok", audit["strict_ok"] is True, "Generation audit is not strict_ok.")
@@ -78,6 +83,8 @@ def validate_generation(manifest_path: Path, xml_path: Path, trace_path: Path, a
         check("trace_and_audit_source_agree", trace["source_sha256"] == audit["source"]["sha256"], "Trace and audit source checksums differ.")
 
     if xml_document is not None:
+        if target is not None:
+            check("xml_target_uri_matches_manifest", xml_document.xpath("/namespace/namespaceURI/text()") == [target["namespace_uri"]], "XML namespaceURI differs from verified OntoME target.")
         _check_xml_structure(xml_document, duplicates, unresolved, check)
     if xml_document is not None and isinstance(trace, dict) and trace_valid:
         _check_trace(trace, xml_document, inventory, profiles.mapping, unresolved, untraced, check)
@@ -89,7 +96,7 @@ def validate_generation(manifest_path: Path, xml_path: Path, trace_path: Path, a
         check("source_reconstruction_not_blocked", result.generation is not None, "Current source and profiles no longer resolve.")
         if result.generation is not None:
             try:
-                expected_xml, expected_trace = write_xml(result.generation, profiles.capability, xsd_path, inventory.source_sha256)
+                expected_xml, expected_trace = write_xml(result.generation, profiles.capability, xsd_path, inventory.source_sha256, target)
                 check("xml_matches_reconstruction", expected_xml == xml_bytes, "XML differs from deterministic reconstruction.")
                 check("trace_matches_reconstruction", expected_trace == trace, "Trace differs from deterministic reconstruction.")
                 check("generation_audit_matches_reconstruction", result.audit == audit, "Generation audit differs from deterministic reconstruction.")
@@ -100,8 +107,9 @@ def validate_generation(manifest_path: Path, xml_path: Path, trace_path: Path, a
     checks.sort(key=lambda item: str(item["name"]))
     failures = sum(not item["valid"] for item in checks)
     return {
-        "format_version": "1.1",
+        "format_version": "1.2" if target else "1.1",
         "valid": failures == 0,
+        **({"target": target} if target else {}),
         "source": {"file": inventory.source_file, "sha256": inventory.source_sha256},
         "xsd": _xsd_identity(profiles.capability),
         "artifacts": {"xml_sha256": xml_sha256, "trace": trace_path.name, "audit": audit_path.name},
