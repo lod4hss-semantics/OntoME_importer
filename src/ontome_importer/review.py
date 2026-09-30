@@ -19,7 +19,7 @@ from ontome_importer.inventory import Inventory, RdfTerm
 RESOURCE_CHOICES = frozenset({"publish", "exclude", "pending"})
 RELATION_PREDICATES = frozenset({
     f"{RDFS}subClassOf", f"{RDFS}subPropertyOf", f"{RDFS}domain", f"{RDFS}range",
-    f"{OWL}equivalentClass", f"{OWL}equivalentProperty", f"{OWL}inverseOf",
+    f"{OWL}equivalentClass", f"{OWL}equivalentProperty", f"{OWL}inverseOf", f"{OWL}disjointWith",
 })
 CLASS_TYPES = frozenset({f"{RDFS}Class", f"{OWL}Class"})
 PROPERTY_TYPES = frozenset({
@@ -57,24 +57,25 @@ def build_review_queue(inventory: Inventory, report: AuditReport) -> dict[str, o
 
     external: dict[str, set[str]] = {}
     external_sources: dict[str, set[str]] = {}
+    external_assertions: dict[str, set[tuple[str, str]]] = {}
     for triple in inventory.triples:
         if (
             triple.subject.kind == "uri"
             and triple.subject.value in scoped_uris
             and triple.predicate.value in RELATION_PREDICATES
             and triple.object.kind == "uri"
-            and triple.object.value not in scoped_uris
             and triple.object.value not in imported_uris
         ):
             external.setdefault(triple.object.value, set()).add(triple.predicate.value)
             external_sources.setdefault(triple.object.value, set()).add(triple.subject.value)
+            external_assertions.setdefault(triple.object.value, set()).add((triple.subject.value, triple.id))
 
     return {
         "format_version": "1.0",
         "source_sha256": inventory.source_sha256,
         "resources": {"classes": classes, "properties": properties},
         "external_dependencies": [
-            {"uri": uri, "relation_predicates": sorted(predicates), "sources": sorted(external_sources[uri])}
+            {"uri": uri, "relation_predicates": sorted(predicates), "sources": sorted(external_sources[uri]), "assertions": [{"source": source, "triple_id": triple_id} for source, triple_id in sorted(external_assertions[uri])]}
             for uri, predicates in sorted(external.items())
         ],
         "dependencies": imports,
@@ -82,7 +83,7 @@ def build_review_queue(inventory: Inventory, report: AuditReport) -> dict[str, o
 
 
 def new_session(
-    queue: dict[str, object], *, manifest_sha256: str, now: datetime | None = None
+    queue: dict[str, object], *, manifest_sha256: str, now: datetime | None = None, assertion_policy: str = "review"
 ) -> dict[str, object]:
     """Create a review session with all resources initially pending."""
     source_sha256 = queue.get("source_sha256")
@@ -107,12 +108,13 @@ def new_session(
     )
     return {
         "format_version": "1.0",
+        "assertion_policy": assertion_policy,
         "created_at": timestamp,
         "source_sha256": source_sha256,
         "manifest_sha256": manifest_sha256,
         "queue_sha256": _sha256(queue),
         "queue": deepcopy(queue),
-        "choices": {"resources": resource_choices, "dependencies": dependencies},
+        "choices": {"resources": resource_choices, "dependencies": dependencies, "assertions": {}, "references": {}, "required": {}},
         "journal": [{"at": timestamp, "action": "session_created"}],
     }
 
@@ -121,7 +123,7 @@ def refresh_session(session: dict[str, object], queue: dict[str, object], *, man
     """Upgrade an existing queue without discarding resource decisions or catalog choices."""
     if session.get("queue_sha256") == _sha256(queue):
         return False
-    updated = new_session(queue, manifest_sha256=manifest_sha256)
+    updated = new_session(queue, manifest_sha256=manifest_sha256, assertion_policy="review")
     old_choices = session["choices"]
     choices = updated["choices"]
     assert isinstance(old_choices, dict) and isinstance(choices, dict)
@@ -132,6 +134,8 @@ def refresh_session(session: dict[str, object], queue: dict[str, object], *, man
     for item in choices["dependencies"]:
         if item["uri"] in previous:
             item.update({key: previous[item["uri"]][key] for key in ("id", "catalog_paths") if key in previous[item["uri"]]})
+    for kind in ("assertions", "references", "required", "resource_reasons", "field_mappings"):
+        choices[kind] = old_choices.get(kind, {})
     session["queue"] = updated["queue"]
     session["queue_sha256"] = updated["queue_sha256"]
     session["choices"] = choices
@@ -143,9 +147,11 @@ def active_dependencies(session: dict[str, object]) -> list[dict[str, object]]:
     choices = session["choices"]
     queue = session["queue"]
     assert isinstance(choices, dict) and isinstance(queue, dict)
-    external = {item["uri"]: item["sources"] for item in queue.get("external_dependencies", [])}
     selected = {uri for uri, choice in choices["resources"].items() if choice != "exclude"}
-    return [item for item in choices["dependencies"] if item["uri"] not in external or any(uri in selected for uri in external[item["uri"]])]
+    published = {uri for uri, choice in choices["resources"].items() if choice == "publish"}
+    ignored = {triple_id for decision in choices.get("assertions", {}).values() if decision.get("action") == "ignore" for triple_id in decision.get("triple_ids", []) if len(decision.get("triple_ids", [])) == 1}
+    active = {item["uri"] for item in queue.get("external_dependencies", []) if item["uri"] not in published and any(link["source"] in selected and link["triple_id"] not in ignored for link in item.get("assertions", []))}
+    return [item for item in choices["dependencies"] if item["uri"] in active and choices.get("references", {}).get(item["uri"], {}).get("action") != "ignore"]
 
 
 def load_session(path: str | Path) -> dict[str, object]:

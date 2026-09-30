@@ -1,6 +1,7 @@
 import hashlib
 from pathlib import Path
 import json
+import yaml
 
 from ontome_importer.cli import main
 from ontome_importer.profiles import load_audit_profiles, load_generation_profiles, verify_capability_xsd
@@ -149,3 +150,186 @@ def test_review_resources_runs_all_by_default_and_allows_revisiting_a_choice(tmp
     monkeypatch.setattr("builtins.input", lambda _: "e")
     assert main(["review", "resources", "--session", str(session), "--resource", uri]) == 0
     assert json.loads(session.read_text())["choices"]["resources"][uri] == "exclude"
+
+
+def test_projection_ignores_unresolved_external_assertion_with_auditable_reason(tmp_path, monkeypatch):
+    source = tmp_path / "ontology.ttl"
+    source.write_text('''@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+<https://example.org/model/> a owl:Ontology ; rdfs:label "Example ontology"@en .
+<https://example.org/model/Thing> a owl:Class ; rdfs:label "Thing" ;
+  rdfs:subClassOf <https://example.org/external/Parent> ; rdfs:seeAlso <https://example.org/docs> .
+''')
+    workspace = tmp_path / "workspace"
+    assert main(["init", "--source", str(source), "--workspace", str(workspace), "--target-ontome-namespace", "427"]) == 0
+    manifest = workspace / "config/generation.yaml"
+    session = workspace / "decisions/review.json"
+    assert main(["review", "start", "--manifest", str(manifest), "--session", str(session)]) == 0
+    monkeypatch.setattr("builtins.input", lambda _: "p")
+    assert main(["review", "resources", "--session", str(session)]) == 0
+    assert main(["review", "check", "--session", str(session)]) == 3
+    languages = iter(["en", "English is the approved language for these labels."])
+    monkeypatch.setattr("builtins.input", lambda _: next(languages))
+    assert main(["review", "required", "--session", str(session)]) == 0
+    decisions = iter(["i", "Not part of the OntoME projection."] * 10)
+    monkeypatch.setattr("builtins.input", lambda _: next(decisions))
+    assert main(["review", "assertions", "--session", str(session), "--reviewer", "Reviewer"]) == 0
+    decisions = iter(["i", "External parent deliberately omitted in this projection."])
+    monkeypatch.setattr("builtins.input", lambda _: next(decisions))
+    assert main(["review", "references", "--session", str(session), "--reviewer", "Reviewer"]) == 0
+    assert main(["review", "check", "--session", str(session)]) == 0
+    assert main(["review", "finalize", "--manifest", str(manifest), "--session", str(session)]) == 0
+    assert main(["generate", "--manifest", str(manifest), "--output-dir", str(workspace / "build/import")]) == 0
+    audit = json.loads((workspace / "build/import/generation-audit.json").read_text())
+    ignored = [item for item in audit["findings"] if item["status"] == "excluded" and item.get("reviewer") == "Reviewer"]
+    assert ignored and all(item["triple_ids"] and item["reviewer"] == "Reviewer" for item in ignored)
+    assert not any(item["construct"] == "missing_label_language" and item["status"] == "excluded" for item in audit["findings"])
+    xml = (workspace / "build/import/import.xml").read_text()
+    assert "Thing" in xml and "Parent" not in xml
+    trace = json.loads((workspace / "build/import/generation-trace.json").read_text())
+    assert any(item["origin"] == "default_label_language" and item["attributes"].get("lang") == "en" for item in trace["entries"])
+    assert main(["validate", "--manifest", str(manifest), "--xml", str(workspace / "build/import/import.xml"), "--trace", str(workspace / "build/import/generation-trace.json"), "--audit", str(workspace / "build/import/generation-audit.json"), "--output", str(workspace / "build/import/validation.json")]) == 0
+
+    mapping_path = workspace / "config/profiles/mapping-generation.yaml"
+    mapping = yaml.safe_load(mapping_path.read_text())
+    mapping["ignored_assertions"][0]["triple_ids"] = ["triple-invalid"]
+    mapping_path.write_text(yaml.safe_dump(mapping))
+    assert main(["generate", "--manifest", str(manifest), "--output-dir", str(workspace / "build/tampered")]) == 3
+    tampered = json.loads((workspace / "build/tampered/generation-audit.json").read_text())
+    assert any(item["status"] == "invalid" and item["category"] == "invalid_profile" for item in tampered["findings"])
+
+
+def test_projection_still_blocks_a_property_without_mandatory_range(tmp_path, monkeypatch):
+    source = tmp_path / "ontology.ttl"
+    source.write_text('''@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+<https://example.org/model/> a owl:Ontology ; rdfs:label "Example ontology"@en .
+<https://example.org/model/Thing> a owl:Class ; rdfs:label "Thing"@en .
+<https://example.org/model/relatedTo> a owl:ObjectProperty ; rdfs:label "related to"@en ;
+  rdfs:domain <https://example.org/model/Thing> .
+''')
+    workspace = tmp_path / "workspace"
+    assert main(["init", "--source", str(source), "--workspace", str(workspace), "--target-ontome-namespace", "427"]) == 0
+    manifest = workspace / "config/generation.yaml"
+    session = workspace / "decisions/review.json"
+    assert main(["review", "start", "--manifest", str(manifest), "--session", str(session)]) == 0
+    assert json.loads(session.read_text())["assertion_policy"] == "review"
+    monkeypatch.setattr("builtins.input", lambda _: "p")
+    assert main(["review", "resources", "--session", str(session)]) == 0
+    assert main(["review", "check", "--session", str(session)]) == 3
+    assert main(["review", "finalize", "--manifest", str(manifest), "--session", str(session)]) == 2
+    assert not (workspace / "build/import/import.xml").exists()
+    answers = iter(["e", "No usable range for this test property"])
+    monkeypatch.setattr("builtins.input", lambda _: next(answers))
+    assert main(["review", "required", "--session", str(session)]) == 0
+    assert main(["review", "check", "--session", str(session)]) == 0
+    assert main(["review", "finalize", "--manifest", str(manifest), "--session", str(session)]) == 0
+    assert main(["generate", "--manifest", str(manifest), "--output-dir", str(workspace / "build/import")]) == 0
+
+
+def test_reference_review_requires_exact_catalog_term_and_can_generate(tmp_path, monkeypatch):
+    source = tmp_path / "ontology.ttl"
+    source.write_text('''@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+<https://example.org/model/> a owl:Ontology ; rdfs:label "Model"@en .
+<https://example.org/model/Child> a owl:Class ; rdfs:label "Child"@en ;
+  rdfs:subClassOf <https://example.org/ext/Parent> .
+''')
+    catalog = tmp_path / "external.rdf"
+    catalog.write_text('''<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:skos="http://www.w3.org/2004/02/skos/core#">
+<rdf:Description rdf:about="https://example.org/ext/Parent"><skos:notation>P1</skos:notation></rdf:Description>
+</rdf:RDF>''')
+    workspace = tmp_path / "workspace"
+    assert main(["init", "--source", str(source), "--workspace", str(workspace), "--target-ontome-namespace", "427"]) == 0
+    manifest = workspace / "config/generation.yaml"
+    session = workspace / "decisions/review.json"
+    assert main(["review", "start", "--manifest", str(manifest), "--session", str(session)]) == 0
+    assert main(["review", "resources", "--session", str(session), "--action", "publish"]) == 0
+    assert main(["review", "check", "--session", str(session)]) == 3
+    answers = iter(["l", "https://example.org/ext/", "555", "", str(catalog)])
+    monkeypatch.setattr("builtins.input", lambda _: next(answers))
+    assert main(["review", "references", "--session", str(session)]) == 0
+    assert main(["review", "check", "--session", str(session)]) == 0
+    assert main(["review", "finalize", "--manifest", str(manifest), "--session", str(session)]) == 0
+    assert main(["generate", "--manifest", str(manifest), "--output-dir", str(workspace / "build/import")]) == 0
+    assert 'referenceNamespace="555">P1' in (workspace / "build/import/import.xml").read_text()
+
+
+def test_catalog_suffix_does_not_resolve_a_different_external_term():
+    from ontome_importer.cli import _resolve_catalog_identifier
+    assert _resolve_catalog_identifier("https://example.org/ext/Parent", {"https://other.example/ext/Parent": "Parent"}) is None
+
+
+def test_required_review_can_supply_an_explicit_local_range(tmp_path, monkeypatch):
+    source = tmp_path / "ontology.ttl"
+    source.write_text('''@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+<https://example.org/model/> a owl:Ontology ; rdfs:label "Model"@en .
+<https://example.org/model/Thing> a owl:Class ; rdfs:label "Thing"@en .
+<https://example.org/model/relatedTo> a owl:ObjectProperty ; rdfs:label "related to"@en ;
+  rdfs:domain <https://example.org/model/Thing> .
+''')
+    workspace = tmp_path / "workspace"
+    assert main(["init", "--source", str(source), "--workspace", str(workspace), "--target-ontome-namespace", "427"]) == 0
+    manifest = workspace / "config/generation.yaml"
+    session = workspace / "decisions/review.json"
+    assert main(["review", "start", "--manifest", str(manifest), "--session", str(session)]) == 0
+    assert main(["review", "resources", "--session", str(session), "--action", "publish"]) == 0
+    choices = iter(["r", "https://example.org/model/Thing", "Curator-approved local range"])
+    monkeypatch.setattr("builtins.input", lambda _: next(choices))
+    assert main(["review", "required", "--session", str(session), "--reviewer", "Curator"]) == 0
+    assert main(["review", "check", "--session", str(session)]) == 0
+    assert main(["review", "finalize", "--manifest", str(manifest), "--session", str(session)]) == 0
+    assert main(["generate", "--manifest", str(manifest), "--output-dir", str(workspace / "build/import")]) == 0
+    assert "<hasRange>Thing</hasRange>" in (workspace / "build/import/import.xml").read_text()
+
+
+def test_assertion_review_maps_supported_text_and_transforms_unknown_literal(tmp_path, monkeypatch):
+    source = tmp_path / "ontology.ttl"
+    source.write_text('''@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+<https://example.org/model/> a owl:Ontology ; rdfs:label "Model"@en .
+<https://example.org/model/Class> a owl:Class ; rdfs:label "Class"@en ;
+  rdfs:comment "Comment"@en ; <https://example.org/model/description> "Description"@en .
+''')
+    workspace = tmp_path / "workspace"
+    assert main(["init", "--source", str(source), "--workspace", str(workspace), "--target-ontome-namespace", "427"]) == 0
+    manifest = workspace / "config/generation.yaml"
+    session = workspace / "decisions/review.json"
+    assert main(["review", "start", "--manifest", str(manifest), "--session", str(session)]) == 0
+    assert main(["review", "resources", "--session", str(session), "--action", "publish"]) == 0
+    answers = iter(["k", "Keep the source comment", "t", "Transform this source description to a context note"])
+    monkeypatch.setattr("builtins.input", lambda _: next(answers))
+    assert main(["review", "assertions", "--session", str(session), "--reviewer", "Curator"]) == 0
+    assert main(["review", "check", "--session", str(session)]) == 0
+    assert main(["review", "finalize", "--manifest", str(manifest), "--session", str(session)]) == 0
+    assert main(["generate", "--manifest", str(manifest), "--output-dir", str(workspace / "build/import")]) == 0
+    xml = (workspace / "build/import/import.xml").read_text()
+    assert "Comment" in xml and "Description" in xml
+
+
+def test_a_reviewed_omission_can_be_changed_for_a_single_assertion(tmp_path, monkeypatch):
+    source = tmp_path / "ontology.ttl"
+    source.write_text('''@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+<https://example.org/model/> a owl:Ontology ; rdfs:label "Model"@en .
+<https://example.org/model/Class> a owl:Class ; rdfs:label "Class"@en ;
+  <https://example.org/model/description> "Description"@en .
+''')
+    workspace = tmp_path / "workspace"
+    assert main(["init", "--source", str(source), "--workspace", str(workspace), "--target-ontome-namespace", "427"]) == 0
+    manifest = workspace / "config/generation.yaml"
+    session = workspace / "decisions/review.json"
+    assert main(["review", "start", "--manifest", str(manifest), "--session", str(session)]) == 0
+    assert main(["review", "resources", "--session", str(session), "--action", "publish"]) == 0
+    decisions = iter(["i", "Initially excluded for review"])
+    monkeypatch.setattr("builtins.input", lambda _: next(decisions))
+    assert main(["review", "assertions", "--session", str(session), "--reviewer", "Reviewer"]) == 0
+    finding = next(iter(json.loads(session.read_text())["choices"]["assertions"]))
+    decisions = iter(["t", "Approved as context note"])
+    monkeypatch.setattr("builtins.input", lambda _: next(decisions))
+    assert main(["review", "assertions", "--session", str(session), "--finding", finding, "--reviewer", "Reviewer"]) == 0
+    assert main(["review", "check", "--session", str(session)]) == 0
+    assert main(["review", "finalize", "--manifest", str(manifest), "--session", str(session)]) == 0
+    assert main(["generate", "--manifest", str(manifest), "--output-dir", str(workspace / "build/import")]) == 0
+    assert "Description" in (workspace / "build/import/import.xml").read_text()

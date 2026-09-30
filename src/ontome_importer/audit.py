@@ -38,6 +38,31 @@ class AuditReport:
         grouped = Counter((finding["status"], finding["category"], finding["construct"]) for finding in self.findings)
         lines.extend(["", "## Decision Summary", "", "Findings are grouped below. A group may be covered by one explicit mapping rule; it does not imply one rule per finding.", "", "| Status | Category | Construct | Count |", "| --- | --- | --- | ---: |"])
         lines.extend(f"| {status} | `{category}` | `{construct}` | {count} |" for (status, category, construct), count in sorted(grouped.items()))
+        resource_types = {resource.id.value: {term.value for term in resource.types} for resource in self.inventory.resources if resource.id.kind == "uri"}
+        selected = {str((finding.get("scope_resource") or finding["resource"])["value"]) for finding in self.findings}
+        class_types = {f"{OWL}Class", f"{RDFS}Class"}
+        property_types = {f"{RDF}Property", f"{OWL}ObjectProperty", f"{OWL}DatatypeProperty", f"{OWL}AnnotationProperty"}
+        candidates = {uri: types for uri, types in resource_types.items() if uri in selected and types & (class_types | property_types)}
+        classes = sum(bool(types & class_types) for types in candidates.values())
+        properties = sum(bool(types & property_types) for types in candidates.values())
+        lines.extend(["", "## Import preview", "", f"Candidate classes: {classes}; candidate properties: {properties}. Annotations and unsupported resource types require an explicit decision.", "", "| Classification | Findings |", "| --- | ---: |"])
+        classifications = Counter("not representable as-is" if not item["triple_ids"] or item["category"] == "forbidden_external_namespace" else "requires decision" if item["status"] in {"blocked", "invalid", "configured"} else "representable / reviewed" for item in self.findings)
+        classifications["out of scope"] = len(self.observations)
+        lines.extend(f"| {name} | {count} |" for name, count in classifications.items())
+        lines.extend(["", "| Candidate | Kind | Labels with language | Domain | Range |", "| --- | --- | ---: | --- | --- |"])
+        triple_by_subject: dict[str, list[object]] = {}
+        for triple in self.inventory.triples:
+            triple_by_subject.setdefault(triple.subject.value, []).append(triple)
+        for uri, types in sorted(candidates.items()):
+            triples = triple_by_subject.get(uri, [])
+            labeled = sum(triple.predicate.value in {f"{RDFS}label", f"{SKOS}prefLabel"} and triple.object.kind == "literal" and bool(triple.object.language) for triple in triples)
+            kind = "class" if types & class_types else "annotation property" if f"{OWL}AnnotationProperty" in types and not types & {f"{RDF}Property", f"{OWL}ObjectProperty", f"{OWL}DatatypeProperty"} else "property"
+            def field_state(name: str) -> str:
+                values = [triple.object for triple in triples if triple.predicate.value == f"{RDFS}{name}"]
+                if not values:
+                    return "missing"
+                return "named URI" if len(values) == 1 and values[0].kind == "uri" else "needs review"
+            lines.append(f"| `{uri}` | {kind} | {labeled} | {field_state('domain') if kind != 'class' else '—'} | {field_state('range') if kind != 'class' else '—'} |")
         external = _external_reference_groups(self.inventory, self.findings)
         if external:
             lines.extend(["", "## External References", "", "These URI prefixes occur outside the import scope. The current mapping contract requires an exact external reference for each URI used.", "", "| URI prefix | Assertions |", "| --- | ---: |"])
@@ -60,6 +85,8 @@ def audit_inventory(
     triples = {triple.id: triple for triple in inventory.triples}
     occurrences = list(detect_constructs(inventory))
     ontology_uris = {triple.subject.value for triple in inventory.triples if triple.subject.kind == "uri" and triple.predicate.value == f"{RDF}type" and triple.object.value == f"{OWL}Ontology"}
+    ignored = {item["finding_id"]: item for item in mapping.get("ignored_assertions", [])}
+    ignored_triples = {triple_id for item in ignored.values() if len(item["triple_ids"]) == 1 for triple_id in item["triple_ids"]}
     for triple in inventory.triples:
         if triple.object.kind != "uri" or _is_local(triple.object, inventory, mapping):
             continue
@@ -92,16 +119,26 @@ def audit_inventory(
             capability_result = "supported"
         if occurrence.construct == "unknown_predicate" and len(matching_rules) == 1 and _generation_mapping_covers(occurrence, matching_rules[0], triples):
             capability_result = "supported"
+        if occurrence.construct == "missing_label_language" and len(matching_rules) == 1 and matching_rules[0].get("target", {}).get("default_label_language"):
+            capability_result = "supported"
         finding = dict(base, capability=capability_result)
-        if occurrence.construct == "forbidden_namespace":
+        if occurrence.id in ignored or (occurrence.triple_ids and set(occurrence.triple_ids) <= ignored_triples and occurrence.construct != "forbidden_namespace"):
+            decision = ignored.get(occurrence.id) or next((item for item in ignored.values() if occurrence.triple_ids and set(occurrence.triple_ids) <= set(item["triple_ids"])), {})
+            finding.update(status="excluded", category="intentional_exclusion", generation_impact="excluded", reason=decision.get("reason", "Assertion excluded by the reviewed decision."))
+            if decision.get("reviewer"):
+                finding.update(reviewer=decision["reviewer"], decided_at=decision["decided_at"], decision_scope=decision["scope"])
+        elif occurrence.construct == "forbidden_namespace":
             finding.update(status="blocked", category="forbidden_external_namespace", generation_impact="blocks_generation", decision_needed="Remove the reference to the forbidden namespace.")
         elif len(matching_rules) > 1:
             finding.update(status="invalid", category="invalid_profile", generation_impact="blocks_generation", decision_needed="Resolve ambiguous mapping rules.")
         elif matching_rules and matching_rules[0]["action"] == "exclude":
             finding.update(status="excluded", category="intentional_exclusion", generation_impact="excluded", mapping_rule=matching_rules[0]["id"], reason=matching_rules[0]["reason"])
+        elif occurrence.construct == "missing_label_language" and matching_rules and matching_rules[0].get("target", {}).get("default_label_language"):
+            finding.update(status="mapped", category="mechanical_transformation", generation_impact="included", mapping_rule=matching_rules[0]["id"])
         elif capability_result == "blocked":
             category = "missing_external_data" if occurrence.construct == "unknown_namespace" else "missing_profile_rule" if occurrence.construct == "missing_external_reference" else "unsupported_rdf_construct"
-            finding.update(status="blocked", category=category, generation_impact="blocks_generation", mapping_rule=matching_rules[0]["id"] if matching_rules else None, decision_needed="Add a supported capability and mapping decision.")
+            guidance = {"missing_domain": "Required OntoME domain absent; run review required to choose a documented reference or exclude the property.", "missing_range": "Required OntoME range absent; run review required to choose a documented reference or exclude the property.", "missing_label_language": "Label has no language; run review required to choose and justify one."}
+            finding.update(status="blocked", category=category, generation_impact="blocks_generation", mapping_rule=matching_rules[0]["id"] if matching_rules else None, decision_needed=guidance.get(occurrence.construct, "Add a supported capability and mapping decision."))
         elif not matching_rules:
             finding.update(status="blocked", category="missing_profile_rule", generation_impact="blocks_generation", decision_needed="Add a mapping rule.")
         elif matching_rules[0]["action"] == "configure":
@@ -185,7 +222,7 @@ def _configured_external_reference(uri: str, mapping: dict[str, object], registr
 def _standard_reference_predicate(predicate: str) -> bool:
     return predicate in {
         f"{RDFS}subClassOf", f"{RDFS}subPropertyOf", f"{RDFS}domain", f"{RDFS}range",
-        f"{OWL}equivalentClass", f"{OWL}equivalentProperty", f"{OWL}inverseOf",
+        f"{OWL}equivalentClass", f"{OWL}equivalentProperty", f"{OWL}inverseOf", f"{OWL}disjointWith",
     }
 
 

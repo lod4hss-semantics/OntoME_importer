@@ -63,9 +63,9 @@ def resolve_namespace_binding(uri: str, version: str | None, path: Path | None =
     return matches[0]
 
 
-def fetch_namespace_catalog(binding: NamespaceBinding, destination: Path, timeout: float = 30.0) -> dict[str, object]:
+def fetch_namespace_catalog(binding: NamespaceBinding, destination: Path, timeout: float = 30.0, base_url: str = "https://ontome.net") -> dict[str, object]:
     """Fetch, parse, and atomically cache the RDF export for a selected namespace."""
-    url = f"https://ontome.net/api/namespaces-rdf-owl.rdf?namespace={binding.ontome_namespace_id}&lang=en"
+    url = f"{base_url.rstrip('/')}/api/namespaces-rdf-owl.rdf?namespace={binding.ontome_namespace_id}&lang=en"
     try:
         with urlopen(url, timeout=timeout) as response:
             content = response.read()

@@ -103,13 +103,25 @@ def resolve_generation(
     mapping: dict[str, object],
     registry: dict[str, object],
 ) -> ResolutionResult:
+    ignored_entries = mapping.get("ignored_assertions", [])
+    if ignored_entries:
+        original_mapping = {**mapping, "ignored_assertions": []}
+        original = audit_inventory(inventory, capability, original_mapping, registry)
+        allowed = {item["id"]: item for item in original.findings if item["status"] in {"blocked", "mapped"} and item["triple_ids"] and item["category"] != "forbidden_external_namespace"}
+        if (len({item["finding_id"] for item in ignored_entries}) != len(ignored_entries)
+            or any(item["finding_id"] not in allowed or item["triple_ids"] != allowed[item["finding_id"]]["triple_ids"] for item in ignored_entries)):
+            issue = _issue("invalid", RdfTerm("uri", str(manifest["target"]["namespace_uri"])), (), None, "Ignored assertion no longer matches a blocking RDF finding and its source triples.", "invalid_profile")
+            return ResolutionResult(None, _audit_document(inventory, capability, [issue], manifest))
     rdf_audit = audit_inventory(inventory, capability, mapping, registry)
     findings = [dict(item, phase="rdf_audit") for item in rdf_audit.findings]
     if not rdf_audit.to_dict()["strict_ok"]:
         return ResolutionResult(None, _audit_document(inventory, capability, findings, manifest))
 
+    ignored_ids = {item["triple_ids"][0] for item in mapping.get("ignored_assertions", []) if len(item["triple_ids"]) == 1}
     triples_by_subject: dict[RdfTerm, list[InventoryTriple]] = {}
     for triple in inventory.triples:
+        if triple.id in ignored_ids:
+            continue
         triples_by_subject.setdefault(triple.subject, []).append(triple)
     bases: list[tuple[RdfTerm, dict[str, object], dict[str, object]]] = []
     for resource in sorted((item.id for item in inventory.resources if item.id.kind == "uri"), key=lambda term: term.value):
@@ -140,7 +152,7 @@ def resolve_generation(
             continue
         source_triples = triples_by_subject.get(resource, [])
         _check_entity_type(resource, target, source_triples, rule["id"], findings)
-        labels = _texts(source_triples, target["label_predicates"], resource, rule["id"], findings, "label")
+        labels = _texts(source_triples, target["label_predicates"], resource, rule["id"], findings, "label", target.get("default_label_language"))
         if not labels:
             findings.append(_issue("blocked", resource, (), rule["id"], "At least one localized label is required.", "incomplete_source_data"))
         texts, configured_predicates = _configured_texts(source_triples, target, resource, rule["id"], findings)
@@ -221,15 +233,15 @@ def _matches(selector: dict[str, object], resource: RdfTerm, inventory: Inventor
     return True
 
 
-def _texts(triples: list[InventoryTriple], predicates: list[str], resource: RdfTerm, rule: str, findings: list[dict[str, object]], name: str) -> tuple[ResolvedText, ...]:
+def _texts(triples: list[InventoryTriple], predicates: list[str], resource: RdfTerm, rule: str, findings: list[dict[str, object]], name: str, default_language: str | None = None) -> tuple[ResolvedText, ...]:
     values = []
     for triple in triples:
         if triple.predicate.value not in predicates:
             continue
-        if triple.object.kind != "literal" or not triple.object.language:
+        if triple.object.kind != "literal" or (not triple.object.language and not default_language):
             findings.append(_issue("blocked", resource, (triple.id,), rule, f"{name} must be a literal with a language.", "invalid_source_data"))
             continue
-        values.append(ResolvedText(triple.object.value, triple.object.language, resource, (triple.id,), rule))
+        values.append(ResolvedText(triple.object.value, triple.object.language or default_language, resource, (triple.id,), rule, "rdf" if triple.object.language else "default_label_language"))
     return tuple(sorted(values, key=lambda item: (item.language, item.value, item.triple_ids)))
 
 

@@ -16,11 +16,11 @@ Audit uses manifest 1.1, capability profile 1.1, namespace registry 1.0, and map
 
 ## Generation Profiles
 
-New workspaces use audit manifest 1.2 and generation manifest 1.1, with the existing capability profiles, namespace registry 1.1, and an internal transformation profile 7.0 compiled by the review. The target namespace requires an OntoME ID, the matching RDF URI, a localized label and a cached, checksummed OntoME export. Earlier manifests remain readable for existing fixtures.
+New workspaces use audit manifest 1.2 and generation manifest 1.1, with the existing capability profiles, namespace registry 1.1, and an internal transformation profile 7.0 compiled by the review. The target namespace requires an OntoME ID, the RDF URI and a localized label. No target export or target API call is required. Earlier manifests remain readable for existing fixtures.
 
 ## Decision Journal
 
-The review session records each human decision for an RDF resource: its action, rationale and timestamp. `review finalize` validates the complete session and writes the internal transformation profile, namespace registry and decision journal. Audit findings link to their resulting compiled decision when applicable.
+The review session records decisions about resources, individual RDF assertions and their grouped coverage, external references and editorial exceptions. Each omission records its reason, reviewer, timestamp and source triple IDs in the compiled mapping and audit. `review check` and `review finalize` run the generation resolver and XSD serializer in memory; `finalize` only writes the internal profiles when that preflight succeeds. The decision journal remains in the session JSON.
 
 Each mapping 7.0 `map` rule has a typed target:
 
@@ -69,6 +69,6 @@ external_reference_rules:
 
 For a published OntoME dependency, select the namespace by URI and explicit version from the versioned OntoME namespace catalog. Download its RDF/XML export with `ontome-importer namespaces fetch`, then use the catalog `skos:notation` values to prefill exact references. Do not derive an OntoME term identifier from an RDF URI without this catalog verification. The namespace registry 1.1 records the selected `uri`, `version`, and `ontome_namespace_id`; `active` and explicitly configured `deprecated` namespaces are allowed, while `forbidden` namespaces block generation and validation.
 
-This rule also applies to RDF/RDFS/OWL/SKOS/XSD terms used as a domain, range or relation target. Select a verified OntoME namespace catalog for each dependency; an unresolved term remains blocking. The importer contains no built-in datatype or vocabulary mapping.
+This rule also applies to RDF/RDFS/OWL/SKOS/XSD terms actually retained as a domain, range or relation target. `review references` requests a catalog only for retained external relations; a selected RDF/XML catalog must contain the exact referenced URI with one `skos:notation`. Its instance, namespace ID and version are declared explicitly. An assertion omitted with a reviewed reason needs no OntoME catalog. The importer contains no built-in datatype or vocabulary mapping.
 
 `EDITORIAL_EXCEPTIONS` is deliberately narrower: it may provide only a missing `hasDomain` or `hasRange`, never replace an RDF assertion that is present. Each exception requires a rationale, approval, date, and decision reference.

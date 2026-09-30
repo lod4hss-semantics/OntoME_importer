@@ -35,7 +35,7 @@ L'outil ne sait pas :
 - deviner une règle d'identification ou inventer un label ;
 - choisir à votre place une langue, un domaine ou un range ;
 - convertir les restrictions OWL, cardinalités, unions, intersections, chaînes de propriétés, individus ou propriétés d'annotation ;
-- guider les décisions par un questionnaire interactif.
+- inventer une interprétation métier pour une construction RDF sans décision explicite.
 
 Autrement dit : vous fournissez l'ontologie, le périmètre de publication et les règles de transformation ; l'outil contrôle ces décisions et fabrique un XML fiable.
 
@@ -240,6 +240,8 @@ L'audit peut se terminer avec le code `0` tout en signalant des blocages. C'est 
 
 La revue est locale et guidée. Elle enregistre les décisions dans `decisions/review.json` sans exposer les profils techniques.
 
+La revue distingue les ressources à créer, leurs assertions RDF, les relations externes retenues et les champs obligatoires. Par défaut, aucune assertion n'est ignorée automatiquement. La décision d'ignorer un groupe est prise dans `review assertions` avec un motif, un auteur, une portée figée et des identifiants de triplets. `--finding` permet de trancher un cas particulier. Ces décisions figurent dans `build/import/generation-audit.json`. `review start --assertion-policy strict` interdit toute omission pour les ressources publiées. `review required` demande de confirmer la langue des labels sans langue et permet de justifier un domaine ou une portée éditoriale lorsque la source n'en fournit aucun. Aucun domaine, portée ou identifiant OntoME n'est inventé.
+
 `review resources` enchaîne toutes les ressources en attente et affiche les constats regroupés avant chaque décision. Utilisez `--limit N` pour limiter une séance, ou `--resource URI` pour changer une décision déjà enregistrée. Relancer `review start` recalcule les dépendances sans effacer les décisions prises.
 
 ```bash
@@ -248,6 +250,9 @@ ontome-importer review start \
   --session decisions/review.json
 
 ontome-importer review resources --session decisions/review.json
+ontome-importer review assertions --session decisions/review.json
+ontome-importer review references --session decisions/review.json
+ontome-importer review required --session decisions/review.json
 ontome-importer review status --session decisions/review.json
 ontome-importer review check --session decisions/review.json
 ontome-importer review finalize \
@@ -266,7 +271,7 @@ ontome-importer namespaces fetch \
 
 Le catalogue exporté par OntoME fournit les identifiants canoniques dans `skos:notation`. La revue télécharge et vérifie ce catalogue après confirmation de la dépendance. Les références sont ensuite résolues automatiquement ; ne saisissez pas d'identifiant OntoME par déduction d'URI. Si une URI externe est absente du catalogue sélectionné, elle reste bloquante et le terminal indique l'URI, le namespace et la version à clarifier.
 
-Une relation vers un terme externe sans `owl:imports` crée aussi une dépendance de revue. Quand aucun catalogue OntoME connu ne permet de vérifier ce terme, `review check` liste les ressources qui l'utilisent : un binding de namespace vérifié doit être ajouté à l'outil, ou la publication des ressources concernées doit être reconsidérée. `review finalize` ne passe pas outre un terme externe non résolu.
+Une relation retenue vers un terme externe crée une décision de revue même sans `owl:imports`. `review references` permet de choisir un export RDF/XML local ou de télécharger explicitement celui de l'instance OntoME sélectionnée (`--ontome-base-url`, uniquement lors du téléchargement). Le terme doit être identifié exactement par le catalogue ; on peut aussi décider d'ignorer cette relation avec un motif. `review check` prévalide les décisions avec le même résolveur et le même XSD que `generate`. `review finalize` ne passe pas outre un terme ou un champ obligatoire non résolu.
 
 Pour un identifiant local, choisissez une règle explicite. L'outil peut extraire un suffixe d'URI, appliquer une capture regex ou utiliser la valeur littérale unique d'un prédicat. Par exemple, si l'ontologie source porte les identifiants canoniques `F1` ou `R1` dans `skos:notation`, le profil peut définir :
 
@@ -307,7 +312,7 @@ En succès, elle écrit :
 - `build/import/generation-trace.json` ;
 - `build/import/generation-audit.json`.
 
-En cas de blocage, elle écrit seulement `generation-audit.json`. Elle n'écrit jamais de XML final incomplet.
+En cas de blocage, elle écrit seulement `generation-audit.json`. Elle n'écrit jamais de XML final incomplet. Après une correction, relancez `review check`, `review finalize` et `generate` : les anciens artefacts générés sont archivés dans `build/import/.history/` avant remplacement.
 
 ### 4. Valider le résultat
 

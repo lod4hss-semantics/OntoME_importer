@@ -47,7 +47,7 @@ def test_review_start_creates_a_local_session(tmp_path):
 def test_namespaces_fetch_uses_the_versioned_namespace_catalog(tmp_path, monkeypatch):
     output = tmp_path / "crm-713.rdf"
 
-    def fake_fetch(binding, destination, timeout):
+    def fake_fetch(binding, destination, timeout, base_url):
         destination.write_text("catalog", encoding="utf-8")
         return {"ontome_namespace_id": binding.ontome_namespace_id, "catalog": str(destination)}
 

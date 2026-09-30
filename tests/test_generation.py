@@ -79,10 +79,14 @@ def test_generate_cli_blocks_without_publishing_xml(tmp_path):
     assert {path.name for path in tmp_path.iterdir()} == {"generation-audit.json"}
 
 
-def test_generate_refuses_to_replace_an_existing_bundle(tmp_path):
+def test_generate_archives_a_previous_bundle_before_publishing_a_blocking_audit(tmp_path):
     assert main(["generate", "--manifest", str(FIXTURES / "import-manifest.yaml"), "--output-dir", str(tmp_path)]) == 0
     original_xml = (tmp_path / "import.xml").read_bytes()
-    assert main(["generate", "--manifest", str(FIXTURES / "import-manifest-missing-range.yaml"), "--output-dir", str(tmp_path)]) == 2
+    assert main(["generate", "--manifest", str(FIXTURES / "import-manifest-missing-range.yaml"), "--output-dir", str(tmp_path)]) == 3
+    assert not (tmp_path / "import.xml").exists()
+    archive = next((tmp_path / ".history").iterdir())
+    assert (archive / "import.xml").read_bytes() == original_xml
+    assert main(["generate", "--manifest", str(FIXTURES / "import-manifest.yaml"), "--output-dir", str(tmp_path)]) == 0
     assert (tmp_path / "import.xml").read_bytes() == original_xml
 
 
