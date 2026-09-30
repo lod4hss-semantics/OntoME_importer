@@ -234,7 +234,8 @@ def _check_trace(trace: dict[str, object], document: etree._Element, inventory: 
                 and exception["field"] == expected_field
                 and _resource_in_inventory(resource, resources)
             )
-            check(f"trace_origin:{entry['id']}", not entry["source_triples"] and entry["mapping_rule"] in rules and valid_exception, "Editorial exception trace has invalid provenance.")
+            expected_sources = exception.get("source_triple_ids", []) if exception else []
+            check(f"trace_origin:{entry['id']}", entry["source_triples"] == expected_sources and entry["mapping_rule"] in rules and valid_exception, "Editorial exception trace has invalid provenance.")
         else:
             resource = entry.get("source_resource")
             valid_resource = isinstance(resource, dict) and _resource_in_inventory(resource, resources)

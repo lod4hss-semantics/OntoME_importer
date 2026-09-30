@@ -6,7 +6,7 @@ import json
 from collections import Counter
 from dataclasses import dataclass
 
-from ontome_importer.constructs import ConstructOccurrence, RELATION_FIELDS, RDF, RDFS, OWL, SKOS, XSD, detect_constructs
+from ontome_importer.constructs import ConstructOccurrence, RELATION_FIELDS, RDF, RDFS, OWL, SKOS, XSD, anonymous_domain_ranges, detect_constructs
 from ontome_importer.external_references import ExternalReferenceError, resolve_external_reference
 from ontome_importer.inventory import Inventory, RdfTerm
 
@@ -87,6 +87,13 @@ def audit_inventory(
     ontology_uris = {triple.subject.value for triple in inventory.triples if triple.subject.kind == "uri" and triple.predicate.value == f"{RDF}type" and triple.object.value == f"{OWL}Ontology"}
     ignored = {item["finding_id"]: item for item in mapping.get("ignored_assertions", [])}
     ignored_triples = {triple_id for item in ignored.values() if len(item["triple_ids"]) == 1 for triple_id in item["triple_ids"]}
+    owl_fields = anonymous_domain_ranges(inventory)
+    replacements = {}
+    for exception in mapping.get("editorial_exceptions", []):
+        key = (exception["resource_uri"], exception["field"])
+        source = owl_fields.get(key)
+        if source and exception["status"] == "approved" and exception.get("source_triple_ids") == source["triple_ids"]:
+            replacements[key] = exception
     for triple in inventory.triples:
         if triple.object.kind != "uri" or _is_local(triple.object, inventory, mapping):
             continue
@@ -133,6 +140,8 @@ def audit_inventory(
             finding.update(status="invalid", category="invalid_profile", generation_impact="blocks_generation", decision_needed="Resolve ambiguous mapping rules.")
         elif matching_rules and matching_rules[0]["action"] == "exclude":
             finding.update(status="excluded", category="intentional_exclusion", generation_impact="excluded", mapping_rule=matching_rules[0]["id"], reason=matching_rules[0]["reason"])
+        elif (replacement := next((exception for (uri, _), exception in replacements.items() if uri == effective_resource.value and occurrence.triple_ids and set(occurrence.triple_ids) <= set(exception["source_triple_ids"])), None)) is not None:
+            finding.update(status="excluded", category="editorial_replacement", generation_impact="excluded", reason=replacement["rationale"], decision_scope="editorial_exception", reviewer=replacement["approved_by"])
         elif occurrence.construct == "missing_label_language" and matching_rules and matching_rules[0].get("target", {}).get("default_label_language"):
             finding.update(status="mapped", category="mechanical_transformation", generation_impact="included", mapping_rule=matching_rules[0]["id"])
         elif capability_result == "blocked":

@@ -21,7 +21,8 @@ from jsonschema import Draft202012Validator, FormatChecker
 
 from ontome_importer import __version__
 from ontome_importer.audit import audit_inventory
-from ontome_importer.external_references import ExternalReferenceError, validate_external_reference_configuration
+from ontome_importer.constructs import OWL, RDFS, anonymous_domain_ranges
+from ontome_importer.external_references import ExternalReferenceError, resolve_external_reference, validate_external_reference_configuration
 from ontome_importer.loader import RdfLoadError, load_inventory
 from ontome_importer.ontome_catalog import NamespaceBinding, OntoMECatalogError, fetch_namespace_catalog, parse_target_namespace, resolve_namespace_binding, catalog_identifiers
 from ontome_importer.package_resources import package_resource_path
@@ -77,7 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
     review_resources = review_commands.add_parser("resources", help="Review pending classes and properties.")
     review_resources.add_argument("--session", default="decisions/review.json", help="Path to the review session.")
     review_resources.add_argument("--limit", type=int, help="Maximum pending resources to review in this run (default: all).")
-    review_resources.add_argument("--resource", help="URI of a resource to review again and change its decision.")
+    review_resources.add_argument("--resource", action="append", help="URI of a resource to review again; repeat to select several resources.")
     review_resources.add_argument("--action", choices=("publish", "exclude"), help="Apply one decision to the selected resources; displays the affected count before applying.")
     review_resources.add_argument("--reason", help="Required when excluding a resource or a batch.")
     review_assertions = review_commands.add_parser("assertions", help="Decide how to handle non-exportable RDF assertions.")
@@ -382,6 +383,64 @@ def _run_review(args: argparse.Namespace) -> int:
                     save_session(session, session_path)
             mapping, registry = _compile_review(session, inventory, profiles)
             report = audit_inventory(inventory, profiles.capability, mapping, registry)
+            owl_sources = anonymous_domain_ranges(inventory)
+            local_classes = {item.id.value for item in inventory.resources if item.id.kind == "uri" and any(term.value in {f"{OWL}Class", f"{RDFS}Class"} for term in item.types) and session["choices"]["resources"].get(item.id.value) == "publish"}
+            for (field, motifs), uris in _owl_review_groups(session, inventory):
+                uris = [uri for uri in uris if session["choices"]["resources"].get(uri) == "publish"]
+                if not uris:
+                    continue
+                print(f"\n{field} / {', '.join(motifs)}: {len(uris)} published property/properties")
+                for uri in uris:
+                    print(f"  {uri}")
+                answer = input("[b]atch exclude all, [r]eview individually, [s]kip group: ").strip().lower()
+                if answer == "b":
+                    reason = input("Reason for excluding these properties: ").strip()
+                    if not reason:
+                        print("A reason is required. No decisions recorded.")
+                        continue
+                    if input(f"Confirm exclusion of {len(uris)} properties? [y/N]: ").strip().lower() != "y":
+                        continue
+                    for uri in uris:
+                        _exclude_review_resource(session, uri, reason)
+                    save_session(session, session_path)
+                elif answer == "r":
+                    for uri in uris:
+                        if session["choices"]["resources"].get(uri) != "publish":
+                            continue
+                        source = owl_sources[(uri, field)]
+                        if session["choices"].get("required", {}).get(uri, {}).get(field):
+                            continue
+                        print(f"\n{uri}: {field} uses {', '.join(source['motifs'])} (source assertion {source['root_triple_id']}).")
+                        print("Named OWL members: " + (", ".join(source["members"]) or "none"))
+                        if not local_classes:
+                            print("No named local published class is available; an external URI needs a configured reference.")
+                        decision = input("[p]ublish with editorial replacement, [e]xclude property, [s]kip: ").strip().lower()
+                        if decision == "e":
+                            reason = input("Reason for excluding the property: ").strip()
+                            if reason:
+                                _exclude_review_resource(session, uri, reason)
+                                save_session(session, session_path)
+                            else:
+                                print("A reason is required.")
+                        elif decision == "p":
+                            ref = input("Exact URI of the replacement class: ").strip()
+                            try:
+                                resolved = _review_reference(ref, session, inventory, mapping, registry)
+                            except ValueError as error:
+                                print(error)
+                                continue
+                            print(f"The XML {field} will reference {ref} ({resolved}); the source OWL expression will not be exported.")
+                            if input("Confirm this replacement? [y/N]: ").strip().lower() != "y":
+                                continue
+                            reason = input("Editorial rationale for this change: ").strip()
+                            if not reason:
+                                print("A rationale is required.")
+                                continue
+                            session["choices"].setdefault("required", {}).setdefault(uri, {})[field] = {"reference_uri": ref, "rationale": reason, "reviewer": args.reviewer or getpass.getuser(), "at": datetime.now(timezone.utc).isoformat(), "source_triple_ids": source["triple_ids"], "root_triple_id": source["root_triple_id"]}
+                            session["journal"].append({"action": "replace_owl_domain_range", "uri": uri, "field": field, "reference_uri": ref, "reason": reason, "source_triple_ids": source["triple_ids"], "reviewer": args.reviewer or getpass.getuser(), "at": datetime.now(timezone.utc).isoformat()})
+                            save_session(session, session_path)
+            mapping, registry = _compile_review(session, inventory, profiles)
+            report = audit_inventory(inventory, profiles.capability, mapping, registry)
             triples = {(triple.subject.value, triple.predicate.value) for triple in inventory.triples}
             for item in report.findings:
                 uri = (item.get("scope_resource") or item["resource"])["value"]
@@ -400,13 +459,13 @@ def _run_review(args: argparse.Namespace) -> int:
                     if not reason:
                         print("A reason is required.")
                         continue
-                    record_choice(session, "resource", uri, "exclude")
-                    session["choices"].setdefault("resource_reasons", {})[uri] = reason
+                    _exclude_review_resource(session, uri, reason)
                 elif answer == "r":
                     ref = input("Exact URI of the published class to use: ").strip()
-                    ref_resource = next((resource for resource in inventory.resources if resource.id.value == ref), None)
-                    if session["choices"]["resources"].get(ref) != "publish" or ref_resource is None or not any(term.value in {"http://www.w3.org/2002/07/owl#Class", "http://www.w3.org/2000/01/rdf-schema#Class"} for term in ref_resource.types):
-                        print("The reference must be a published class in this import.")
+                    try:
+                        _review_reference(ref, session, inventory, mapping, registry)
+                    except ValueError as error:
+                        print(error)
                         continue
                     reason = input("Editorial rationale: ").strip()
                     if not reason:
@@ -434,6 +493,8 @@ def _run_review(args: argparse.Namespace) -> int:
             manifest = Path(args.manifest or session.get("manifest_path") or session_path.parent.parent / "config/generation.yaml")
             profiles = load_generation_profiles(manifest)
             inventory = _review_inventory(manifest, profiles)
+            for (field, motifs), uris in _owl_review_groups(session, inventory):
+                print(f"OWL review: {field} / {', '.join(motifs)}: {len(uris)} properties: {', '.join(uris)}. Run review required.")
             mapping, registry = _compile_review(session, inventory, profiles)
             groups = _assertion_groups(session, audit_inventory(inventory, profiles.capability, {**mapping, "ignored_assertions": []}, registry), inventory)
             if groups:
@@ -483,15 +544,16 @@ def _run_review(args: argparse.Namespace) -> int:
             print(f"Reviewed omissions: {len(mapping.get('ignored_assertions', []))} findings recorded in the generation audit.")
             print(f"Next command: ontome-importer generate --manifest {manifest_path} --output-dir {manifest_path.parent.parent / 'build/import'}")
             return 0
-        if args.resource and args.resource not in session["choices"]["resources"]:
-            raise ValueError(f"Unknown review resource: {args.resource}")
+        for uri in args.resource or []:
+            if uri not in session["choices"]["resources"]:
+                raise ValueError(f"Unknown review resource: {uri}")
         if args.limit is not None and args.limit < 1:
             raise ValueError("--limit must be positive")
-        pending = [args.resource] if args.resource else [uri for uri, choice in session["choices"]["resources"].items() if choice == "pending"]
+        pending = list(dict.fromkeys(args.resource)) if args.resource else [uri for uri, choice in session["choices"]["resources"].items() if choice == "pending"]
         if args.action and args.action == "exclude" and not args.reason:
             raise ValueError("Exclusion requires --reason")
+        selected = pending if args.resource else pending[:args.limit]
         if args.action:
-            selected = pending[:args.limit]
             print(f"Apply {args.action} to {len(selected)} resource(s)")
             for uri in selected:
                 resource = _review_resource(session, uri)
@@ -507,7 +569,7 @@ def _run_review(args: argparse.Namespace) -> int:
             if status(session)["resources"]["pending"] == 0:
                 print("Next command: ontome-importer review assertions --session " + str(session_path))
             return 0
-        for uri in pending[:args.limit]:
+        for uri in selected:
             resource = _review_resource(session, uri)
             print(f"\n{resource['kind']} {uri}\nLabels: {resource['labels'] or 'none'}\nFindings: {resource['finding_count']}")
             for (category, construct), count in resource["finding_summary"]:
@@ -554,6 +616,39 @@ def _review_resource(session: dict[str, object], uri: str) -> dict[str, object]:
             publishable = bool(kinds & {"http://www.w3.org/2002/07/owl#Class", "http://www.w3.org/2000/01/rdf-schema#Class", "http://www.w3.org/2002/07/owl#ObjectProperty", "http://www.w3.org/2002/07/owl#DatatypeProperty", "http://www.w3.org/1999/02/22-rdf-syntax-ns#Property"})
             return {"kind": "Class" if kind == "classes" else "Property", "labels": labels, "finding_count": len(match["findings"]), "finding_summary": sorted(summary.items()), "publishable": publishable}
     raise ValueError(f"Review resource is missing from the queue: {uri}")
+
+
+def _exclude_review_resource(session: dict[str, object], uri: str, reason: str) -> None:
+    record_choice(session, "resource", uri, "exclude")
+    session["choices"].setdefault("resource_reasons", {})[uri] = reason
+    session["journal"][-1]["reason"] = reason
+
+
+def _owl_review_groups(session: dict[str, object], inventory: object) -> list[tuple[tuple[str, tuple[str, ...]], list[str]]]:
+    grouped: dict[tuple[str, tuple[str, ...]], set[str]] = {}
+    properties = {item.id.value for item in inventory.resources if item.id.kind == "uri" and any(term.value in {f"{OWL}ObjectProperty", f"{OWL}DatatypeProperty", "http://www.w3.org/1999/02/22-rdf-syntax-ns#Property"} for term in item.types)}
+    for (uri, field), source in anonymous_domain_ranges(inventory).items():
+        if uri not in properties or session["choices"]["resources"].get(uri) != "publish" or session["choices"].get("required", {}).get(uri, {}).get(field):
+            continue
+        grouped.setdefault((field, tuple(source["motifs"])), set()).add(uri)
+    return [(key, sorted(uris)) for key, uris in sorted(grouped.items())]
+
+
+def _review_reference(ref: str, session: dict[str, object], inventory: object, mapping: dict[str, object], registry: dict[str, object]) -> str:
+    resource = next((item for item in inventory.resources if item.id.kind == "uri" and item.id.value == ref), None)
+    if ref in session["choices"]["resources"]:
+        if resource and session["choices"]["resources"][ref] == "publish" and any(term.value in {f"{OWL}Class", f"{RDFS}Class"} for term in resource.types):
+            return "local published class"
+        raise ValueError(f"Replacement {ref} must be a published local class.")
+    try:
+        resolved = resolve_external_reference(ref, mapping, registry)
+    except ExternalReferenceError as error:
+        _, catalogs = _review_catalogs(session["choices"])
+        matches = [(item["ontome_namespace_id"], terms[ref]) for item, terms in catalogs if ref in terms]
+        if len(matches) == 1:
+            return f"namespace {matches[0][0]}, identifier {matches[0][1]}"
+        raise ValueError(f"Reference {ref} must be a published local class or have an explicit external reference/rule: {error}") from error
+    return f"namespace {resolved.reference_namespace}, identifier {resolved.identifier}"
 
 
 def _print_review_status(value: dict[str, object]) -> None:
@@ -607,11 +702,11 @@ def _print_review_blockers(blockers: list[dict[str, object]]) -> None:
     counts: Counter[tuple[str, str]] = Counter()
     for item in blockers:
         key = (str(item.get("category", "unknown")), str(item.get("reason") or item.get("decision_needed") or item.get("construct") or "Needs review"))
-        grouped.setdefault(key, set()).add(str(item.get("resource", {}).get("value", "")))
+        grouped.setdefault(key, set()).add(str((item.get("scope_resource") or item.get("resource") or {}).get("value", "")))
         counts[key] += 1
     print(f"Review cannot generate XML: {len(blockers)} blocking findings.")
     for (category, reason), resources in sorted(grouped.items()):
-        print(f"  {category}: {reason} ({counts[(category, reason)]}; e.g. {', '.join(sorted(resources)[:3])})")
+        print(f"  {category}: {reason} ({counts[(category, reason)]} finding(s), {len(resources)} URI(s); first: {', '.join(sorted(resources)[:3])})")
     print("Run review assertions, review references or review required to resolve these issues; a mandatory XML field cannot be ignored.")
 
 
@@ -691,7 +786,14 @@ def _compile_review(session: dict[str, object], inventory: object, profiles: obj
             rule["target"] = target
         rules.append(rule)
     registry, catalog_terms = _review_catalogs(choices)
-    external_references = {}
+    configured_registry = profiles.namespace_registry
+    for namespace in configured_registry["namespaces"]:
+        existing = next((item for item in registry["namespaces"] if item["ontome_namespace_id"] == namespace["ontome_namespace_id"]), None)
+        if existing is not None and existing != namespace:
+            raise ValueError(f"Conflicting reference namespace configuration: {namespace['ontome_namespace_id']}")
+        if existing is None:
+            registry["namespaces"].append(namespace)
+    external_references = {item["uri"]: item for item in profiles.mapping.get("external_references", [])}
     published = {uri for uri, choice in resource_choices.items() if choice == "publish"}
     ignored_relation_triples = {decision["triple_ids"][0] for decision in choices.get("assertions", {}).values() if decision.get("action") == "ignore" and len(decision.get("triple_ids", [])) == 1}
     relation_predicates = {f"{RDFS}subClassOf", f"{RDFS}subPropertyOf", f"{RDFS}domain", f"{RDFS}range", f"{OWL}equivalentClass", f"{OWL}equivalentProperty", f"{OWL}inverseOf", f"{OWL}disjointWith"}
@@ -707,8 +809,17 @@ def _compile_review(session: dict[str, object], inventory: object, profiles: obj
         if len(matches) != 1:
             continue
         item, identifier = matches[0]
-        external_references[triple.object.value] = {"uri": triple.object.value, "reference_namespace": item["ontome_namespace_id"], "identifier": identifier}
-    mapping = {"format_version": "7.0", "scope": scope, "rules": rules, "external_references": list(external_references.values()), "external_reference_rules": [], "editorial_exceptions": [], "decisions": []}
+        external_references.setdefault(triple.object.value, {"uri": triple.object.value, "reference_namespace": item["ontome_namespace_id"], "identifier": identifier})
+    for fields in choices.get("required", {}).values():
+        for field in ("hasDomain", "hasRange"):
+            ref = fields.get(field, {}).get("reference_uri")
+            if ref and ref not in published and ref not in external_references:
+                matches = [(item, _resolve_catalog_identifier(ref, terms)) for item, terms in catalog_terms]
+                matches = [(item, identifier) for item, identifier in matches if identifier]
+                if len(matches) == 1:
+                    item, identifier = matches[0]
+                    external_references[ref] = {"uri": ref, "reference_namespace": item["ontome_namespace_id"], "identifier": identifier}
+    mapping = {"format_version": "7.0", "scope": scope, "rules": rules, "external_references": list(external_references.values()), "external_reference_rules": profiles.mapping.get("external_reference_rules", []), "editorial_exceptions": [], "decisions": []}
     for uri, fields in choices.get("required", {}).items():
         if resource_choices.get(uri) == "publish" and fields.get("label_language"):
             mapping["decisions"].append({"id": "review-label-" + hashlib.sha256(uri.encode()).hexdigest()[:12], "resource_uri": uri, "construct": "missing_label_language", "action": "transform", "status": "approved", "rationale": fields["language_rationale"], "approved_by": fields["reviewer"], "approved_at": fields["at"][:10], "decision_reference": "review session label language"})
@@ -727,7 +838,7 @@ def _compile_review(session: dict[str, object], inventory: object, profiles: obj
             if field not in fields:
                 continue
             decision = fields[field]
-            mapping["editorial_exceptions"].append({"id": "review-exception-" + hashlib.sha256(f"{uri}|{field}".encode()).hexdigest()[:12], "resource_uri": uri, "field": field, "reference_uri": decision["reference_uri"], "status": "approved", "rationale": decision["rationale"], "approved_by": decision["reviewer"], "approved_at": decision["at"][:10], "decision_reference": "review session required field"})
+            mapping["editorial_exceptions"].append({"id": "review-exception-" + hashlib.sha256(f"{uri}|{field}".encode()).hexdigest()[:12], "resource_uri": uri, "field": field, "reference_uri": decision["reference_uri"], "status": "approved", "rationale": decision["rationale"], "approved_by": decision["reviewer"], "approved_at": decision["at"][:10], "decision_reference": "review session required field", **({"source_triple_ids": decision["source_triple_ids"]} if decision.get("source_triple_ids") else {})})
     report = audit_inventory(inventory, profiles.capability, mapping, registry)
     decisions = choices.get("assertions", {})
     mapping["ignored_assertions"] = [

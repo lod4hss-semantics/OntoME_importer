@@ -271,20 +271,20 @@ def _relations(triples: list[InventoryTriple], target: dict[str, object], resour
 
 def _single_reference(triples: list[InventoryTriple], predicate: str, resource: RdfTerm, rule: str, identifiers: dict[RdfTerm, str], mapping: dict[str, object], registry: dict[str, object], findings: list[dict[str, object]], used_namespaces: set[int], label: str, field: str) -> ResolvedReference | None:
     matches = [triple for triple in triples if triple.predicate.value == predicate]
+    exception = next((item for item in mapping.get("editorial_exceptions", []) if item["resource_uri"] == resource.value and item["field"] == field and item["status"] == "approved"), None)
+    if exception and (not matches and not exception.get("source_triple_ids") or len(matches) == 1 and matches[0].object.kind == "blank_node" and matches[0].id in exception.get("source_triple_ids", [])):
+        target = RdfTerm("uri", exception["reference_uri"])
+        source_ids = tuple(exception.get("source_triple_ids", ()))
+        if target in identifiers:
+            return ResolvedReference(identifiers[target].value, None, resource, source_ids, rule, "editorial_exception", None, exception["id"])
+        try:
+            external = resolve_external_reference(target.value, mapping, registry)
+        except ExternalReferenceError as error:
+            findings.append(_issue("blocked", resource, source_ids, rule, str(error), error.category))
+            return None
+        used_namespaces.add(external.reference_namespace)
+        return ResolvedReference(external.identifier, external.reference_namespace, resource, source_ids, rule, "editorial_exception", external.rule_id, exception["id"])
     if len(matches) != 1:
-        if not matches:
-            exception = next((item for item in mapping.get("editorial_exceptions", []) if item["resource_uri"] == resource.value and item["field"] == field), None)
-            if exception and exception["status"] == "approved":
-                target = RdfTerm("uri", exception["reference_uri"])
-                if target in identifiers:
-                    return ResolvedReference(identifiers[target].value, None, resource, (), rule, "editorial_exception", None, exception["id"])
-                try:
-                    external = resolve_external_reference(target.value, mapping, registry)
-                except ExternalReferenceError as error:
-                    findings.append(_issue("blocked", resource, (), rule, str(error), error.category))
-                    return None
-                used_namespaces.add(external.reference_namespace)
-                return ResolvedReference(external.identifier, external.reference_namespace, resource, (), rule, "editorial_exception", external.rule_id, exception["id"])
         findings.append(_issue("blocked", resource, tuple(item.id for item in matches), rule, f"Property requires exactly one named {label}.", "incomplete_source_data" if not matches else "ambiguous_source_data"))
         return None
     return _reference(matches[0], resource, rule, identifiers, mapping, registry, findings, used_namespaces)

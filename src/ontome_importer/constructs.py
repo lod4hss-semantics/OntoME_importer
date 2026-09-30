@@ -120,6 +120,38 @@ def detect_constructs(inventory: Inventory) -> tuple[ConstructOccurrence, ...]:
     return _inherit_blank_node_scope(occurrences, inventory)
 
 
+def anonymous_domain_ranges(inventory: Inventory) -> dict[tuple[str, str], dict[str, object]]:
+    """Find OWL expressions directly used as a property's mandatory field.
+
+    Keep the complete blank-node subtree so an approved replacement can account
+    for exactly the source assertions it replaces, including RDF list cells.
+    """
+    outgoing: dict[RdfTerm, list[InventoryTriple]] = {}
+    for triple in inventory.triples:
+        outgoing.setdefault(triple.subject, []).append(triple)
+    result: dict[tuple[str, str], dict[str, object]] = {}
+    for triple in inventory.triples:
+        if triple.subject.kind != "uri" or triple.object.kind != "blank_node" or triple.predicate.value not in {f"{RDFS}domain", f"{RDFS}range"}:
+            continue
+        field = "hasDomain" if triple.predicate.value == f"{RDFS}domain" else "hasRange"
+        seen = {triple.object}
+        pending = [triple.object]
+        members = [triple]
+        while pending:
+            for child in outgoing.get(pending.pop(), []):
+                members.append(child)
+                if child.object.kind == "blank_node" and child.object not in seen:
+                    seen.add(child.object)
+                    pending.append(child.object)
+        motifs = sorted({"union" if member.predicate.value == f"{OWL}unionOf" else "intersection" for member in members if member.predicate.value in {f"{OWL}unionOf", f"{OWL}intersectionOf"}})
+        if motifs:
+            key = (triple.subject.value, field)
+            # An ambiguous field cannot be replaced by an exception for one triple.
+            if sum(item.predicate == triple.predicate for item in outgoing[triple.subject]) == 1:
+                result[key] = {"root_triple_id": triple.id, "triple_ids": sorted(member.id for member in members), "motifs": motifs, "members": sorted({member.object.value for member in members if member.predicate.value == f"{RDF}first" and member.object.kind == "uri"})}
+    return result
+
+
 def _occurrence(construct: str, resource: RdfTerm, *triple_ids: str) -> ConstructOccurrence:
     return ConstructOccurrence(construct, resource, tuple(sorted(triple_ids)))
 
