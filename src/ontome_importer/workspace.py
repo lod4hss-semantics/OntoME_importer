@@ -195,11 +195,14 @@ L'audit crée `build/audit/review-queue.json`. Le premier audit signale normalem
 ```bash
 ontome-importer review start --manifest config/generation.yaml --session decisions/review.json
 ontome-importer review resources --session decisions/review.json
+ontome-importer review assertions --session decisions/review.json
+ontome-importer review references --session decisions/review.json
+ontome-importer review required --session decisions/review.json
 ontome-importer review check --session decisions/review.json
 ontome-importer review finalize --manifest config/generation.yaml --session decisions/review.json
 ```
 
-Répétez `review resources` jusqu'à ce que toutes les décisions soient prises. Si une dépendance externe est détectée, la revue vous demande de confirmer sa version et télécharge son catalogue OntoME localement.
+Répétez la commande de revue adaptée aux blocages signalés par `review check`. Une ressource publiée ne fait pas disparaître ses assertions non représentables : elles requièrent une décision et un motif dans `review assertions`. Pour une relation externe conservée, `review references` demande explicitement le catalogue et la version de l'instance OntoME choisie. `review required` traite les champs indispensables. `review finalize` ne compile les profils que si la prévalidation réussit.
 
 ## Générer et valider
 
