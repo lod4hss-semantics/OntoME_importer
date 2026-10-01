@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import sys
 import tempfile
@@ -32,6 +33,47 @@ from ontome_importer.resolution import resolve_generation
 from ontome_importer.validator import validate_generation
 from ontome_importer.workspace import WorkspaceError, initialize_workspace
 from ontome_importer.xml_writer import XmlGenerationError, write_xml
+
+
+def _shell_path(path: Path) -> str:
+    return shlex.quote(str(path))
+
+
+def _next_steps(*options: tuple[str, str | None]) -> None:
+    """Explain actionable alternatives without silently choosing for the reviewer."""
+    print("Next steps:" if len(options) != 1 else "Next command:" if options[0][1] else "Next step:")
+    for index, (description, command) in enumerate(options, 1):
+        prefix = f"  {index}. " if len(options) > 1 else "  "
+        print(prefix + description)
+        if command:
+            print("     " + command)
+
+
+def _review_command(stage: str, session_path: Path) -> str:
+    return f"ontome-importer review {stage} --session {_shell_path(session_path)}"
+
+
+def _review_next_steps(session: dict[str, object], session_path: Path, *, assertions_pending: int | None = None) -> None:
+    progress = status(session)
+    if progress["resources"]["pending"]:
+        _next_steps(
+            (f"Decide the {progress['resources']['pending']} pending resource(s).", _review_command("resources", session_path)),
+            ("Inspect progress and remaining decisions.", _review_command("check", session_path)),
+        )
+        return
+    if not progress["resources"]["publish"]:
+        _next_steps(("Select at least one publishable resource.", _review_command("resources", session_path)))
+        return
+    options = []
+    if assertions_pending is None or assertions_pending:
+        options.append(("Review RDF assertions if any still require a decision.", _review_command("assertions", session_path)))
+    if progress["dependencies"]["configured"] < progress["dependencies"]["total"]:
+        options.append(("Resolve external references used by published resources.", _review_command("references", session_path)))
+    options.extend([
+        ("Resolve mandatory fields and OWL domain/range choices.", _review_command("required", session_path)),
+        ("Check whether any decisions still block generation.", _review_command("check", session_path)),
+    ])
+    _next_steps(*options)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -146,8 +188,7 @@ def _run_init(args: argparse.Namespace) -> int:
         )
         print("Workspace created.")
         print(f"OntoME target namespace ID: {namespace_id}")
-        print("Next command:")
-        print(command)
+        _next_steps(("Audit the RDF source and prepare the review queue.", command))
         return 0
     except (WorkspaceError, OntoMECatalogError, RdfLoadError, OSError, ProfileError, EOFError) as error:
         print(f"ontome-importer init: {error}", file=sys.stderr)
@@ -171,7 +212,21 @@ def _run_audit(args: argparse.Namespace) -> int:
             "audit.md": report.to_markdown().encode("utf-8"),
             "review-queue.json": _json(build_review_queue(inventory, report)).encode("utf-8"),
         }, replace_managed={"inventory.json", "audit.json", "audit.md", "review-queue.json"})
-        print(f"ontome-importer audit: {'ready for generation' if report.to_dict()['strict_ok'] else 'decisions required'}; reports written to {args.output_dir}")
+        ready = report.to_dict()["strict_ok"]
+        print(f"ontome-importer audit: {'ready for generation' if ready else 'decisions required'}; reports written to {args.output_dir}")
+        generation_manifest = manifest_path.parent / "generation.yaml"
+        session_path = manifest_path.parent.parent / "decisions/review.json"
+        if generation_manifest.exists():
+            review = ("Create or resume the review session to decide what will be published.", f"ontome-importer review start --manifest {_shell_path(generation_manifest)} --session {_shell_path(session_path)}")
+            if ready:
+                _next_steps(
+                    ("If the generation profile is already finalized, generate the XML.", f"ontome-importer generate --manifest {_shell_path(generation_manifest)} --output-dir {_shell_path(manifest_path.parent.parent / 'build/import')}"),
+                    ("Otherwise, begin or resume the publication review.", review[1]),
+                )
+            else:
+                _next_steps(review)
+        else:
+            _next_steps((f"Create a generation manifest beside {manifest_path.name} before starting review or generation; read {args.output_dir}/audit.md for the findings.", None))
         return 0
     except (ProfileError, RdfLoadError, OSError) as error:
         print(f"ontome-importer audit: {error}", file=sys.stderr)
@@ -188,6 +243,10 @@ def _run_namespaces(args: argparse.Namespace) -> int:
         result = fetch_namespace_catalog(binding, output, args.timeout, args.ontome_base_url)
         metadata.write_text(_json(result), encoding="utf-8")
         print(f"OntoME namespace {binding.ontome_namespace_id} ({binding.uri}, version {binding.version}) cached at {output}")
+        _next_steps(
+            ("If the session is in decisions/review.json, select this catalog while reviewing the external reference.", "ontome-importer review references --session decisions/review.json"),
+            ("If editing a mapping profile directly, declare the namespace and exact term identifiers there.", None),
+        )
         return 0
     except (OntoMECatalogError, OSError, ValueError) as error:
         print(f"ontome-importer namespaces: {error}", file=sys.stderr)
@@ -221,11 +280,12 @@ def _run_review(args: argparse.Namespace) -> int:
             save_session(session, session_path)
             print(f"Assertion policy: {session.get('assertion_policy', 'strict')}")
             _print_review_status(status(session))
-            print("Next command: ontome-importer review resources --session " + str(session_path))
+            _review_next_steps(session, session_path)
             return 0
         session = load_session(session_path)
         if args.review_command == "status":
             _print_review_status(status(session))
+            _review_next_steps(session, session_path)
             return 0
         if args.review_command == "assertions":
             manifest = Path(args.manifest or session.get("manifest_path") or session_path.parent.parent / "config/generation.yaml")
@@ -272,8 +332,9 @@ def _run_review(args: argparse.Namespace) -> int:
                         session["choices"].setdefault("field_mappings", {})[f"{uri}|{triple.predicate.value}"] = {"uri": uri, "predicate": triple.predicate.value, "field": field, "construct": item["construct"], "action": "map" if answer == "k" else "transform", "reason": reason, "reviewer": reviewer, "at": now}
                 session["journal"].append({"action": {"i": "ignore_assertions", "k": "map_assertions", "t": "transform_assertions"}[answer], "at": now, "reviewer": reviewer, "scope": key, "finding_ids": [item["id"] for item in findings], "reason": reason})
                 save_session(session, session_path)
-            print(f"Assertion groups requiring a decision: {len(_assertion_groups(session, audit_inventory(inventory, profiles.capability, {**mapping, 'ignored_assertions': []}, registry), inventory))}")
-            print("Next command: ontome-importer review references --session " + str(session_path))
+            remaining = len(_assertion_groups(session, audit_inventory(inventory, profiles.capability, {**mapping, 'ignored_assertions': []}, registry), inventory))
+            print(f"Assertion groups requiring a decision: {remaining}")
+            _review_next_steps(session, session_path, assertions_pending=remaining)
             return 0
         if args.review_command == "references":
             manifest = Path(args.manifest or session.get("manifest_path") or session_path.parent.parent / "config/generation.yaml")
@@ -354,7 +415,7 @@ def _run_review(args: argparse.Namespace) -> int:
                                 session["choices"]["assertions"].pop(finding["id"])
                     save_session(session, session_path)
             _print_review_status(status(session))
-            print("Next command: ontome-importer review required --session " + str(session_path))
+            _review_next_steps(session, session_path)
             return 0
         if args.review_command == "required":
             manifest = Path(args.manifest or session.get("manifest_path") or session_path.parent.parent / "config/generation.yaml")
@@ -476,19 +537,25 @@ def _run_review(args: argparse.Namespace) -> int:
                     continue
                 save_session(session, session_path)
             _print_review_status(status(session))
-            print("Next command: ontome-importer review check --session " + str(session_path))
+            _next_steps(
+                ("Check whether the recorded decisions are sufficient for generation.", _review_command("check", session_path)),
+                ("Revisit individual resource decisions if a property must be excluded instead.", _review_command("resources", session_path)),
+            )
             return 0
         if args.review_command == "check":
             review_status = status(session)
             if session.get("assertion_policy") == "strict" and _active_ignored_decisions(session):
                 print("Review incomplete: strict policy conflicts with existing ignored assertions. Reconsider these decisions in review assertions/references.")
+                _next_steps(("Revise ignored assertions.", _review_command("assertions", session_path)), ("Revise ignored external relations.", _review_command("references", session_path)))
                 return 3
             pending = review_status["resources"]["pending"]
             if pending:
                 print(f"Review incomplete: {pending} resource decisions pending. Run review resources.")
+                _next_steps(("Decide pending resources.", _review_command("resources", session_path)))
                 return 3
             if not review_status["resources"]["publish"]:
                 print("Review incomplete: no classes or properties selected for publication.")
+                _next_steps(("Select at least one class or property to publish.", _review_command("resources", session_path)))
                 return 3
             manifest = Path(args.manifest or session.get("manifest_path") or session_path.parent.parent / "config/generation.yaml")
             profiles = load_generation_profiles(manifest)
@@ -501,18 +568,28 @@ def _run_review(args: argparse.Namespace) -> int:
                 print(f"Review incomplete: {len(groups)} assertion groups require decisions. Run review assertions.")
                 for name, values in groups:
                     print(f"  {name}: {len(values)} finding(s)")
+                options = [("Decide the remaining assertion groups.", _review_command("assertions", session_path))]
+                if _owl_review_groups(session, inventory):
+                    options.append(("For OWL domain/range constructions, choose a replacement or exclude the affected properties.", _review_command("required", session_path)))
+                _next_steps(*options)
                 return 3
             dependencies = review_status["dependencies"]
             if dependencies["configured"] != dependencies["total"]:
                 print(f"Review incomplete: {dependencies['configured']}/{dependencies['total']} references configured. Run review references.")
                 _print_unresolved_dependencies(session)
+                _next_steps(("Resolve or omit the external relations listed above.", _review_command("references", session_path)))
                 return 3
             blockers = _preflight(inventory, profiles, mapping, registry)
             if blockers:
                 _print_review_blockers(blockers)
+                _next_steps(
+                    ("Review mandatory fields and OWL domain/range choices.", _review_command("required", session_path)),
+                    ("Revisit assertions or external references if these are the reported blockers.", _review_command("assertions", session_path)),
+                    ("Exclude a resource that cannot be published with its current assertions.", _review_command("resources", session_path)),
+                )
                 return 3
             print("Review is ready for generation.")
-            print(f"Next command: ontome-importer review finalize --manifest {manifest} --session {session_path}")
+            _next_steps(("Compile the approved decisions into generation profiles.", f"ontome-importer review finalize --manifest {_shell_path(manifest)} --session {_shell_path(session_path)}"))
             return 0
         if args.review_command == "finalize":
             manifest_path = Path(args.manifest)
@@ -542,7 +619,7 @@ def _run_review(args: argparse.Namespace) -> int:
             })
             print("Review finalized. Internal transformation profiles were updated.")
             print(f"Reviewed omissions: {len(mapping.get('ignored_assertions', []))} findings recorded in the generation audit.")
-            print(f"Next command: ontome-importer generate --manifest {manifest_path} --output-dir {manifest_path.parent.parent / 'build/import'}")
+            _next_steps(("Generate the XML and trace reports.", f"ontome-importer generate --manifest {_shell_path(manifest_path)} --output-dir {_shell_path(manifest_path.parent.parent / 'build/import')}"))
             return 0
         for uri in args.resource or []:
             if uri not in session["choices"]["resources"]:
@@ -566,8 +643,7 @@ def _run_review(args: argparse.Namespace) -> int:
                     session["journal"][-1]["reason"] = args.reason
             save_session(session, session_path)
             _print_review_status(status(session))
-            if status(session)["resources"]["pending"] == 0:
-                print("Next command: ontome-importer review assertions --session " + str(session_path))
+            _review_next_steps(session, session_path)
             return 0
         for uri in selected:
             resource = _review_resource(session, uri)
@@ -593,8 +669,7 @@ def _run_review(args: argparse.Namespace) -> int:
                 session["journal"][-1]["reason"] = reason
             save_session(session, session_path)
         _print_review_status(status(session))
-        if status(session)["resources"]["pending"] == 0:
-            print("Next command: ontome-importer review assertions --session " + str(session_path))
+        _review_next_steps(session, session_path)
         return 0
     except (OntoMECatalogError, ProfileError, RdfLoadError, OSError, ValueError) as error:
         print(f"ontome-importer review: {error}", file=sys.stderr)
@@ -925,6 +1000,14 @@ def _run_generate(args: argparse.Namespace) -> int:
         if result.generation is None:
             _publish_files(output_dir, {"generation-audit.json": _json(result.audit).encode("utf-8")}, replace_managed={"generation-audit.json", "generation-trace.json", "import.xml", "validation.json"})
             print("ontome-importer generate: generation blocked; see generation-audit.json", file=sys.stderr)
+            session_path = manifest_path.parent.parent / "decisions/review.json"
+            if session_path.exists():
+                _next_steps(
+                    (f"Read the blocking findings in {output_dir / 'generation-audit.json'}.", None),
+                    ("Return to review and resolve the reported blockers before regenerating.", _review_command("check", session_path)),
+                )
+            else:
+                _next_steps((f"Read {output_dir / 'generation-audit.json'} and correct the generation profile or RDF source before retrying.", None))
             return 3
         xml, trace = write_xml(result.generation, profiles.capability, xsd_path, inventory.source_sha256, target_identity(profiles.manifest))
         _publish_files(output_dir, {
@@ -933,7 +1016,7 @@ def _run_generate(args: argparse.Namespace) -> int:
             "generation-audit.json": _json(result.audit).encode("utf-8"),
         }, replace_managed={"generation-audit.json", "generation-trace.json", "import.xml", "validation.json"})
         print(f"ontome-importer generate: XML and reports written to {output_dir}")
-        print(f"Next command: ontome-importer validate --manifest {manifest_path} --xml {output_dir / 'import.xml'} --trace {output_dir / 'generation-trace.json'} --audit {output_dir / 'generation-audit.json'} --output {output_dir / 'validation.json'}")
+        _next_steps(("Validate the generated XML, audit, and trace together.", f"ontome-importer validate --manifest {_shell_path(manifest_path)} --xml {_shell_path(output_dir / 'import.xml')} --trace {_shell_path(output_dir / 'generation-trace.json')} --audit {_shell_path(output_dir / 'generation-audit.json')} --output {_shell_path(output_dir / 'validation.json')}"))
         return 0
     except XmlGenerationError as error:
         print(f"ontome-importer generate: {error}", file=sys.stderr)
@@ -956,6 +1039,11 @@ def _run_validate(args: argparse.Namespace) -> int:
         report = validate_generation(Path(args.manifest), Path(args.xml), Path(args.trace), Path(args.audit))
         output = Path(args.output)
         _publish_files(output.parent, {output.name: _json(report).encode("utf-8")}, replace_managed={output.name})
+        if not report["valid"]:
+            _next_steps(
+                (f"Inspect failed checks in {output}.", None),
+                ("After correcting the source or profiles, regenerate and validate again.", f"ontome-importer generate --manifest {_shell_path(Path(args.manifest))} --output-dir {_shell_path(Path(args.xml).parent)}"),
+            )
         return 0 if report["valid"] else 3
     except (ProfileError, RdfLoadError, OSError) as error:
         print(f"ontome-importer validate: {error}", file=sys.stderr)

@@ -3,6 +3,7 @@ from pathlib import Path
 
 from ontome_importer import __version__
 from ontome_importer import cli
+from ontome_importer.audit import AuditReport
 from ontome_importer.cli import main
 
 
@@ -101,3 +102,57 @@ rules: []
     assert main(["audit", "--manifest", str(tmp_path / "manifest.yaml"), "--output-dir", str(output)]) == 2
     assert "Capability XSD does not exist" in capsys.readouterr().err
     assert not output.exists()
+
+
+def test_audit_guides_review_only_when_decisions_are_required(tmp_path, capsys):
+    source = Path(__file__).resolve().parents[1] / "fixtures/e2e/minimal.ttl"
+    workspace = tmp_path / "my-import"
+    assert main(["init", "--source", str(source), "--workspace", str(workspace), "--target-ontome-namespace", "427"]) == 0
+    capsys.readouterr()
+    manifest = workspace / "config/audit.yaml"
+    assert main(["audit", "--manifest", str(manifest), "--output-dir", str(workspace / "build/audit")]) == 0
+    output = capsys.readouterr().out
+    assert "decisions required" in output
+    assert f"ontome-importer review start --manifest {workspace / 'config/generation.yaml'} --session {workspace / 'decisions/review.json'}" in output
+    assert "ontome-importer generate" not in output
+
+
+def test_audit_ready_offers_generation_or_review(tmp_path, monkeypatch, capsys):
+    source = Path(__file__).resolve().parents[1] / "fixtures/e2e/minimal.ttl"
+    workspace = tmp_path / "my-import"
+    assert main(["init", "--source", str(source), "--workspace", str(workspace), "--target-ontome-namespace", "427"]) == 0
+    capsys.readouterr()
+    monkeypatch.setattr(cli, "audit_inventory", lambda inventory, *_: AuditReport(inventory, (), ()))
+    assert main(["audit", "--manifest", str(workspace / "config/audit.yaml"), "--output-dir", str(workspace / "build/audit")]) == 0
+    output = capsys.readouterr().out
+    assert "ready for generation" in output and "Next steps:" in output
+    assert "ontome-importer generate --manifest" in output
+    assert "ontome-importer review start --manifest" in output
+    assert "If the generation profile is already finalized" in output
+
+
+def test_review_guides_pending_resources_and_owl_blockers(tmp_path, capsys):
+    source = tmp_path / "source.ttl"
+    source.write_text('''@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+<https://example.org/model/> a owl:Ontology ; rdfs:label "Model"@en .
+<https://example.org/model/Person> a owl:Class ; rdfs:label "Person"@en .
+<https://example.org/model/p> a owl:ObjectProperty ; rdfs:label "p"@en ;
+ rdfs:domain [ a owl:Class ; owl:unionOf (<https://example.org/model/Person>) ] ;
+ rdfs:range <https://example.org/model/Person> .
+''')
+    workspace = tmp_path / "my-import"
+    session = workspace / "decisions/review.json"
+    assert main(["init", "--source", str(source), "--workspace", str(workspace), "--target-ontome-namespace", "427"]) == 0
+    assert main(["review", "start", "--manifest", str(workspace / "config/generation.yaml"), "--session", str(session)]) == 0
+    output = capsys.readouterr().out
+    assert f"ontome-importer review resources --session {session}" in output
+    assert "ontome-importer review start" not in output
+    assert main(["review", "resources", "--session", str(session), "--action", "publish"]) == 0
+    output = capsys.readouterr().out
+    assert "Next steps:" in output and "ontome-importer review assertions" in output
+    assert "ontome-importer review check" in output
+    assert main(["review", "check", "--session", str(session)]) == 3
+    output = capsys.readouterr().out
+    assert "OWL review:" in output and "ontome-importer review required" in output
+    assert "ontome-importer review assertions" in output
