@@ -32,7 +32,6 @@ def initialize_workspace(
     target_label: str | None,
     target_label_lang: str | None,
     target_version: str | None,
-    target_namespace_id: int,
 ) -> str:
     if not source.is_file():
         raise WorkspaceError(f"Source RDF file does not exist: {source}")
@@ -78,10 +77,10 @@ def initialize_workspace(
         (profiles / "mapping-audit.yaml").write_text(_audit_mapping(scope_prefixes), encoding="utf-8")
         (profiles / "mapping-generation.yaml").write_text(_generation_mapping(scope_prefixes), encoding="utf-8")
         config = staging / "config"
-        (config / "audit.yaml").write_text(_audit_manifest(source_name, format_name, checksum, namespace_uri, target_namespace_id), encoding="utf-8")
-        (config / "generation.yaml").write_text(_generation_manifest(source_name, format_name, checksum, namespace_uri, target_label, target_label_lang, target_version, target_namespace_id), encoding="utf-8")
+        (config / "audit.yaml").write_text(_audit_manifest(source_name, format_name, checksum, namespace_uri), encoding="utf-8")
+        (config / "generation.yaml").write_text(_generation_manifest(source_name, format_name, checksum, namespace_uri, target_label, target_label_lang, target_version), encoding="utf-8")
         (staging / "build").mkdir()
-        (staging / "README.md").write_text(_workspace_readme(source_name, target_namespace_id, namespace_uri), encoding="utf-8")
+        (staging / "README.md").write_text(_workspace_readme(source_name, namespace_uri), encoding="utf-8")
 
         profiles_loaded = load_audit_profiles(config / "audit.yaml")
         verify_capability_xsd(profiles_loaded.capability)
@@ -112,16 +111,15 @@ def _write_template(template: str, destination: Path) -> None:
     destination.write_text(resources.files("ontome_importer").joinpath(template).read_text(encoding="utf-8"), encoding="utf-8")
 
 
-def _audit_manifest(source_name: str, source_format: str, checksum: str, namespace_uri: str, namespace_id: int) -> str:
+def _audit_manifest(source_name: str, source_format: str, checksum: str, namespace_uri: str) -> str:
     return f'''# Created by ontome-importer init.
-format_version: "1.2"
+format_version: "1.3"
 source:
   file: {_yaml_string(f'../source/{source_name}')}
   format: {source_format}
   sha256: {checksum}
 target:
   namespace_uri: {_yaml_string(namespace_uri)}
-  ontome_namespace_id: {namespace_id}
 profiles:
   capability: profiles/capability-audit.yaml
   namespace_registry: profiles/namespace-registry.yaml
@@ -130,17 +128,16 @@ strict: true
 '''
 
 
-def _generation_manifest(source_name: str, source_format: str, checksum: str, namespace_uri: str, target_label: str, target_label_lang: str, target_version: str | None, namespace_id: int) -> str:
+def _generation_manifest(source_name: str, source_format: str, checksum: str, namespace_uri: str, target_label: str, target_label_lang: str, target_version: str | None) -> str:
     version_line = f"  version: {_yaml_string(target_version)}\n" if target_version else ""
     return f'''# Created by ontome-importer init.
-format_version: "1.1"
+format_version: "1.2"
 source:
   file: {_yaml_string(f'../source/{source_name}')}
   format: {source_format}
   sha256: {checksum}
 target:
   namespace_uri: {_yaml_string(namespace_uri)}
-  ontome_namespace_id: {namespace_id}
   labels:
     - lang: {_yaml_string(target_label_lang)}
       value: {_yaml_string(target_label)}
@@ -176,11 +173,13 @@ rules: []
 '''
 
 
-def _workspace_readme(source_name: str, namespace_id: int, namespace_uri: str) -> str:
+def _workspace_readme(source_name: str, namespace_uri: str) -> str:
     return f'''# Espace de travail d'import
 
 Votre source RDF copiée est `source/{source_name}`.
-Namespace/version OntoME cible : ID {namespace_id} (`{namespace_uri}`).
+URI du namespace importé : `{namespace_uri}`.
+
+Chargez le XML généré depuis l'interface du projet OntoME. Ce projet doit déjà posséder un namespace racine ; l'ID de projet ne fait pas partie du XML.
 
 ## Prochaine étape : audit
 

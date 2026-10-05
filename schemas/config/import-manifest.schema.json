@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": ["format_version", "source", "target", "profiles", "strict"],
   "properties": {
-    "format_version": {"enum": ["1.0", "1.1"]},
+    "format_version": {"enum": ["1.0", "1.1", "1.2"]},
     "source": {
       "type": "object", "additionalProperties": false,
       "required": ["file"],

@@ -71,7 +71,9 @@ def write_xml(generation: ResolvedGeneration, capability: dict[str, object], xsd
     for entry in entries:
         entry["id"] = "trace-" + hashlib.sha256(json.dumps(entry, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     xsd = capability["xsd"]
-    trace = {"format_version": "1.3" if target else "1.2", "source_sha256": source_sha256, "xsd": {"version": xsd["version"], "sha256": xsd["sha256"]}, "xml_sha256": xml_sha256, "entries": entries, **({"target": target} if target else {})}
+    legacy_target = target is not None and "ontome_namespace_id" in target
+    format_version = "1.2" if target is None else "1.3" if legacy_target else "1.4"
+    trace = {"format_version": format_version, "source_sha256": source_sha256, "xsd": {"version": xsd["version"], "sha256": xsd["sha256"]}, "xml_sha256": xml_sha256, "entries": entries, **({"target": target} if target else {})}
     return xml, trace
 
 

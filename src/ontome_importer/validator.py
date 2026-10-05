@@ -61,13 +61,13 @@ def validate_generation(manifest_path: Path, xml_path: Path, trace_path: Path, a
     xml_sha256 = hashlib.sha256(xml_bytes).hexdigest() if xml_bytes is not None else ""
     if isinstance(trace, dict) and trace_valid:
         if target is not None:
-            check("trace_target_matches_manifest", trace.get("target") == target, "Trace target differs from the declared OntoME target.")
+            check("trace_target_matches_manifest", trace.get("target") == target, "Trace target differs from the declared namespace URI.")
         check("xml_sha256_matches_trace", trace["xml_sha256"] == xml_sha256, "XML checksum differs from generation trace.", "generation-trace.json#/xml_sha256")
         check("trace_source_sha256_matches_source", trace["source_sha256"] == inventory.source_sha256, "Trace source checksum differs from source.")
         check("trace_xsd_matches_capability", trace["xsd"] == _xsd_identity(profiles.capability), "Trace XSD identity differs from capability profile.")
     if isinstance(audit, dict) and audit_valid:
         if target is not None:
-            check("audit_target_matches_manifest", audit.get("target") == target, "Audit target differs from the declared OntoME target.")
+            check("audit_target_matches_manifest", audit.get("target") == target, "Audit target differs from the declared namespace URI.")
         check("audit_source_sha256_matches_source", audit["source"]["sha256"] == inventory.source_sha256, "Audit source checksum differs from source.")
         check("audit_xsd_matches_capability", audit["xsd"] == _xsd_identity(profiles.capability), "Audit XSD identity differs from capability profile.")
         check("generation_audit_strict_ok", audit["strict_ok"] is True, "Generation audit is not strict_ok.")
@@ -107,7 +107,7 @@ def validate_generation(manifest_path: Path, xml_path: Path, trace_path: Path, a
     checks.sort(key=lambda item: str(item["name"]))
     failures = sum(not item["valid"] for item in checks)
     return {
-        "format_version": "1.2" if target else "1.1",
+        "format_version": "1.2" if "ontome_namespace_id" in target else "1.3",
         "valid": failures == 0,
         **({"target": target} if target else {}),
         "source": {"file": inventory.source_file, "sha256": inventory.source_sha256},

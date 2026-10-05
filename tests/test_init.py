@@ -4,7 +4,7 @@ import json
 import yaml
 
 from ontome_importer.cli import main
-from ontome_importer.profiles import load_audit_profiles, load_generation_profiles, verify_capability_xsd
+from ontome_importer.profiles import load_audit_profiles, load_generation_profiles, target_identity, verify_capability_xsd
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,7 +19,6 @@ def test_init_creates_a_valid_auditable_workspace(tmp_path, capsys):
         "--scope-uri-prefix", "https://example.org/",
         "--target-namespace-uri", "https://example.org/target/",
         "--target-label", "Example target namespace",
-        "--target-ontome-namespace", "123",
     ]) == 0
     assert "Next command:" in capsys.readouterr().out
     assert {path.name for path in workspace.iterdir()} == {"README.md", "source", "config", "build"}
@@ -45,7 +44,6 @@ def test_init_renders_multiple_scope_prefixes_and_refuses_existing_workspace(tmp
         "init", "--source", str(SOURCE), "--format", "rdfxml", "--workspace", str(workspace),
         "--scope-uri-prefix", "https://example.org/one/", "--scope-uri-prefix", "https://example.org/two/",
         "--target-namespace-uri", "https://example.org/target/", "--target-label", "Example target namespace",
-        "--target-ontome-namespace", "https://ontome.net/namespace/123#namespace-hierarchy",
     ]
     assert main(arguments) == 0
     mapping = (workspace / "config/profiles/mapping-audit.yaml").read_text()
@@ -59,7 +57,7 @@ def test_init_requires_an_explicit_format_when_extension_is_unknown(tmp_path, ca
     source = tmp_path / "ontology.data"
     source.write_bytes(SOURCE.read_bytes())
     workspace = tmp_path / "my-import"
-    assert main(["init", "--source", str(source), "--workspace", str(workspace), "--scope-uri-prefix", "https://example.org/", "--target-namespace-uri", "https://example.org/target/", "--target-label", "Example target namespace", "--target-ontome-namespace", "123"]) == 2
+    assert main(["init", "--source", str(source), "--workspace", str(workspace), "--scope-uri-prefix", "https://example.org/", "--target-namespace-uri", "https://example.org/target/", "--target-label", "Example target namespace"]) == 2
     assert "Cannot infer RDF format" in capsys.readouterr().err
     assert not workspace.exists()
 
@@ -69,9 +67,8 @@ def test_workspace_completes_the_documented_terminal_workflow(tmp_path, monkeypa
     assert main([
         "init", "--source", str(E2E_SOURCE), "--format", "turtle", "--workspace", str(workspace),
         "--scope-uri-prefix", "https://example.org/e2e/",
-        "--target-ontome-namespace", "123",
     ]) == 0
-    assert "ontome_namespace_id: 123" in (workspace / "config/generation.yaml").read_text()
+    assert "ontome_namespace_id:" not in (workspace / "config/generation.yaml").read_text()
     assert main(["audit", "--manifest", str(workspace / "config/audit.yaml"), "--output-dir", str(workspace / "build/audit")]) == 0
     session = workspace / "decisions/review.json"
     assert main(["review", "start", "--manifest", str(workspace / "config/generation.yaml"), "--session", str(session)]) == 0
@@ -87,10 +84,10 @@ def test_workspace_completes_the_documented_terminal_workflow(tmp_path, monkeypa
         "--audit", str(workspace / "build/import/generation-audit.json"),
         "--output", str(workspace / "build/import/validation.json"),
     ]) == 0
-    assert json.loads((workspace / "build/import/validation.json").read_text())["target"]["ontome_namespace_id"] == 123
+    assert json.loads((workspace / "build/import/validation.json").read_text())["target"] == {"namespace_uri": "https://example.org/e2e/"}
     trace_path = workspace / "build/import/generation-trace.json"
     trace = json.loads(trace_path.read_text())
-    trace["target"]["ontome_namespace_id"] = 456
+    trace["target"]["namespace_uri"] = "https://example.org/tampered/"
     trace_path.write_text(json.dumps(trace))
     assert main([
         "validate", "--manifest", str(workspace / "config/generation.yaml"),
@@ -102,11 +99,10 @@ def test_workspace_completes_the_documented_terminal_workflow(tmp_path, monkeypa
     assert any(item["name"] == "trace_target_matches_manifest" and not item["valid"] for item in checks)
 
 
-def test_init_requires_a_target_when_noninteractive(tmp_path, capsys):
-    workspace = tmp_path / "no-target"
-    assert main(["init", "--source", str(E2E_SOURCE), "--workspace", str(workspace)]) == 2
-    assert "--target-ontome-namespace" in capsys.readouterr().err
-    assert not workspace.exists()
+def test_init_requires_a_namespace_uri_only_when_source_cannot_supply_one(tmp_path, capsys):
+    workspace = tmp_path / "workspace"
+    assert main(["init", "--source", str(E2E_SOURCE), "--workspace", str(workspace)]) == 0
+    assert "Workspace created." in capsys.readouterr().out
 
 
 def test_init_and_audit_do_not_contact_ontome_for_the_target(tmp_path, monkeypatch):
@@ -114,11 +110,28 @@ def test_init_and_audit_do_not_contact_ontome_for_the_target(tmp_path, monkeypat
         raise AssertionError("Target initialization must not contact OntoME")
     monkeypatch.setattr("ontome_importer.ontome_catalog.urlopen", no_network)
     workspace = tmp_path / "offline"
-    assert main(["init", "--source", str(SOURCE), "--workspace", str(workspace), "--target-ontome-namespace", "427", "--target-namespace-uri", "https://example.org/target/", "--target-label", "Example target"]) == 0
+    assert main(["init", "--source", str(SOURCE), "--workspace", str(workspace), "--target-namespace-uri", "https://example.org/target/", "--target-label", "Example target"]) == 0
     assert not (workspace / "references").exists()
-    assert load_audit_profiles(workspace / "config/audit.yaml").manifest["target"] == {"namespace_uri": "https://example.org/target/", "ontome_namespace_id": 427}
+    assert load_audit_profiles(workspace / "config/audit.yaml").manifest["target"] == {"namespace_uri": "https://example.org/target/"}
     assert main(["audit", "--manifest", str(workspace / "config/audit.yaml"), "--output-dir", str(workspace / "build/audit")]) == 0
     assert load_generation_profiles(workspace / "config/generation.yaml")
+
+
+def test_legacy_target_namespace_ids_remain_readable(tmp_path):
+    workspace = tmp_path / "legacy"
+    assert main(["init", "--source", str(E2E_SOURCE), "--workspace", str(workspace)]) == 0
+    audit_path = workspace / "config/audit.yaml"
+    audit = yaml.safe_load(audit_path.read_text())
+    audit["format_version"] = "1.2"
+    audit["target"]["ontome_namespace_id"] = 427
+    audit_path.write_text(yaml.safe_dump(audit))
+    generation_path = workspace / "config/generation.yaml"
+    generation = yaml.safe_load(generation_path.read_text())
+    generation["format_version"] = "1.1"
+    generation["target"]["ontome_namespace_id"] = 427
+    generation_path.write_text(yaml.safe_dump(generation))
+    assert target_identity(load_audit_profiles(audit_path).manifest) == {"namespace_uri": "https://example.org/e2e/", "ontome_namespace_id": 427}
+    assert target_identity(load_generation_profiles(generation_path).manifest) == {"namespace_uri": "https://example.org/e2e/", "ontome_namespace_id": 427}
 
 
 def test_init_uses_the_only_labeled_source_ontology_for_a_different_target_uri(tmp_path):
@@ -129,7 +142,7 @@ def test_init_uses_the_only_labeled_source_ontology_for_a_different_target_uri(t
 <https://example.org/terms#> a owl:Ontology .
 ''')
     workspace = tmp_path / "terms"
-    assert main(["init", "--source", str(source), "--workspace", str(workspace), "--target-namespace-uri", "https://example.org/terms#", "--target-ontome-namespace", "427"]) == 0
+    assert main(["init", "--source", str(source), "--workspace", str(workspace), "--target-namespace-uri", "https://example.org/terms#"]) == 0
     target = load_generation_profiles(workspace / "config/generation.yaml").manifest["target"]
     assert target["namespace_uri"] == "https://example.org/terms#"
     assert target["labels"] == [{"lang": "en", "value": "Example ontology"}]
@@ -137,7 +150,7 @@ def test_init_uses_the_only_labeled_source_ontology_for_a_different_target_uri(t
 
 def test_review_resources_runs_all_by_default_and_allows_revisiting_a_choice(tmp_path, monkeypatch, capsys):
     workspace = tmp_path / "review"
-    assert main(["init", "--source", str(E2E_SOURCE), "--workspace", str(workspace), "--target-ontome-namespace", "427"]) == 0
+    assert main(["init", "--source", str(E2E_SOURCE), "--workspace", str(workspace)]) == 0
     manifest = workspace / "config/generation.yaml"
     session = workspace / "decisions/review.json"
     assert main(["review", "start", "--manifest", str(manifest), "--session", str(session)]) == 0
@@ -161,7 +174,7 @@ def test_projection_ignores_unresolved_external_assertion_with_auditable_reason(
   rdfs:subClassOf <https://example.org/external/Parent> ; rdfs:seeAlso <https://example.org/docs> .
 ''')
     workspace = tmp_path / "workspace"
-    assert main(["init", "--source", str(source), "--workspace", str(workspace), "--target-ontome-namespace", "427"]) == 0
+    assert main(["init", "--source", str(source), "--workspace", str(workspace)]) == 0
     manifest = workspace / "config/generation.yaml"
     session = workspace / "decisions/review.json"
     assert main(["review", "start", "--manifest", str(manifest), "--session", str(session)]) == 0
@@ -209,7 +222,7 @@ def test_projection_still_blocks_a_property_without_mandatory_range(tmp_path, mo
   rdfs:domain <https://example.org/model/Thing> .
 ''')
     workspace = tmp_path / "workspace"
-    assert main(["init", "--source", str(source), "--workspace", str(workspace), "--target-ontome-namespace", "427"]) == 0
+    assert main(["init", "--source", str(source), "--workspace", str(workspace)]) == 0
     manifest = workspace / "config/generation.yaml"
     session = workspace / "decisions/review.json"
     assert main(["review", "start", "--manifest", str(manifest), "--session", str(session)]) == 0
@@ -240,7 +253,7 @@ def test_reference_review_requires_exact_catalog_term_and_can_generate(tmp_path,
 <rdf:Description rdf:about="https://example.org/ext/Parent"><skos:notation>P1</skos:notation></rdf:Description>
 </rdf:RDF>''')
     workspace = tmp_path / "workspace"
-    assert main(["init", "--source", str(source), "--workspace", str(workspace), "--target-ontome-namespace", "427"]) == 0
+    assert main(["init", "--source", str(source), "--workspace", str(workspace)]) == 0
     manifest = workspace / "config/generation.yaml"
     session = workspace / "decisions/review.json"
     assert main(["review", "start", "--manifest", str(manifest), "--session", str(session)]) == 0
@@ -270,7 +283,7 @@ def test_required_review_can_supply_an_explicit_local_range(tmp_path, monkeypatc
   rdfs:domain <https://example.org/model/Thing> .
 ''')
     workspace = tmp_path / "workspace"
-    assert main(["init", "--source", str(source), "--workspace", str(workspace), "--target-ontome-namespace", "427"]) == 0
+    assert main(["init", "--source", str(source), "--workspace", str(workspace)]) == 0
     manifest = workspace / "config/generation.yaml"
     session = workspace / "decisions/review.json"
     assert main(["review", "start", "--manifest", str(manifest), "--session", str(session)]) == 0
@@ -293,7 +306,7 @@ def test_assertion_review_maps_supported_text_and_transforms_unknown_literal(tmp
   rdfs:comment "Comment"@en ; <https://example.org/model/description> "Description"@en .
 ''')
     workspace = tmp_path / "workspace"
-    assert main(["init", "--source", str(source), "--workspace", str(workspace), "--target-ontome-namespace", "427"]) == 0
+    assert main(["init", "--source", str(source), "--workspace", str(workspace)]) == 0
     manifest = workspace / "config/generation.yaml"
     session = workspace / "decisions/review.json"
     assert main(["review", "start", "--manifest", str(manifest), "--session", str(session)]) == 0
@@ -317,7 +330,7 @@ def test_a_reviewed_omission_can_be_changed_for_a_single_assertion(tmp_path, mon
   <https://example.org/model/description> "Description"@en .
 ''')
     workspace = tmp_path / "workspace"
-    assert main(["init", "--source", str(source), "--workspace", str(workspace), "--target-ontome-namespace", "427"]) == 0
+    assert main(["init", "--source", str(source), "--workspace", str(workspace)]) == 0
     manifest = workspace / "config/generation.yaml"
     session = workspace / "decisions/review.json"
     assert main(["review", "start", "--manifest", str(manifest), "--session", str(session)]) == 0

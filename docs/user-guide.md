@@ -127,7 +127,7 @@ Un projet d'import regroupe une source RDF, les décisions prises par l'équipe 
 
 Vous pouvez lancer `init` depuis n'importe quel dossier du terminal. Les options `--source` et `--workspace` indiquent explicitement où se trouvent le RDF et le nouveau dossier à créer. Les chemins absolus, comme dans l'exemple suivant, évitent toute ambiguïté.
 
-Avant `init`, créez dans OntoME le namespace ou la version cible. Copiez son ID ou l'URL de sa page. L'ID est une donnée d'entrée obligatoire, jamais déduit de l'ontologie source. `init` n'interroge pas OntoME pour vérifier la cible.
+Créez dans OntoME le projet qui recevra l'import et vérifiez qu'il possède un namespace racine. L'upload se fait ensuite depuis l'interface de ce projet : son ID ne fait pas partie du XML et n'est pas demandé par `init`.
 
 Exemple avec un RDF/XML :
 
@@ -135,15 +135,12 @@ Exemple avec un RDF/XML :
 ontome-importer init \
   --source ~/Téléchargements/mon-ontologie.rdf \
   --format rdfxml \
-  --target-ontome-namespace 'https://ontome.net/namespace/123#namespace-hierarchy' \
   --workspace ~/Documents/imports/mon-ontologie
 ```
 
 `--source` est votre fichier RDF original. Il n'est pas modifié. L'outil en copie les octets dans le nouveau dossier de travail et calcule son checksum.
 
 `--workspace` est le nouveau dossier que l'outil doit créer. Il doit ne pas encore exister. L'outil refuse d'écraser un import existant.
-
-`--target-ontome-namespace` accepte l'ID positif (`123`) ou une URL de page `https://ontome.net/namespace/123`. Si l'option manque, le terminal demande cette valeur ; en mode non interactif, elle est obligatoire. L'ID est enregistré tel quel : assurez-vous qu'il désigne la bonne cible dans votre instance OntoME, notamment si vous travaillez en staging. Aucun appel API ne vérifie cette cible.
 
 L'URI RDF, le libellé et sa langue proviennent de la déclaration `owl:Ontology` dans la source lorsque celle-ci est non ambiguë. Si l'URI manque ou est ambiguë, précisez `--target-namespace-uri`. Si cette URI n'a pas de libellé, l'outil reprend le seul libellé d'ontologie disponible dans la source ; s'il manque ou est ambigu, précisez `--target-label` et `--target-label-lang`. `owl:versionInfo` (ou à défaut `owl:versionIRI`) fournit la version si elle est unique ; `--target-version` permet de la préciser.
 
@@ -153,7 +150,6 @@ Par défaut, `--scope-uri-prefix` reprend l'URI RDF cible. **L'URI de l'ontologi
 ontome-importer init \
   --source ~/Téléchargements/mon-ontologie.rdf \
   --format rdfxml \
-  --target-ontome-namespace 123 \
   --target-namespace-uri 'https://example.org/ontology/' \
   --scope-uri-prefix 'https://example.org/terms/' \
   --scope-uri-prefix 'https://example.org/extension/' \
@@ -301,7 +297,7 @@ ontome-importer review references \
 
 Remplacez cette URL d'exemple par celle de votre instance. Cela ne provoque toujours aucun appel API vers le namespace cible de l'import. Pour revenir sur une référence déjà décidée, ajoutez `--uri 'URI-du-terme-externe'` à `review references`.
 
-`review required` permet de confirmer **avec un motif** la langue d'un libellé sans langue ; cette transformation est tracée. Si une propriété n'a aucun domaine ou aucune portée dans la source, vous pouvez choisir une classe publiée dans le même import comme référence éditoriale justifiée, exclure la propriété ou laisser ce point en attente. Il n'est pas possible de remplacer ainsi un domaine ou une portée **déjà présents** dans le RDF mais impossibles à résoudre : il faut traiter leur référence ou revoir la publication de la propriété. Le XSD exige ces champs ; la CLI n'invente aucune valeur. Si une ressource n'a aucun libellé exploitable, `review check` la signalera et vous pourrez réviser son choix de publication.
+`review required` permet de confirmer **avec un motif** la langue d'un libellé sans langue ; cette transformation est tracée. Si une propriété n'a aucun domaine ou aucune portée dans la source, vous pouvez choisir une classe publiée dans le même import comme référence éditoriale justifiée, exclure la propriété ou laisser ce point en attente. Si son domaine ou sa portée contient une construction anonyme `owl:unionOf` ou `owl:intersectionOf`, vous pouvez soit choisir une URI exacte de remplacement, confirmer l'écart sémantique et le justifier, soit exclure les propriétés concernées individuellement ou par groupe avec un motif commun. Le XSD exige ces champs ; la CLI n'invente aucune valeur. Si une ressource n'a aucun libellé exploitable, `review check` la signalera et vous pourrez réviser son choix de publication.
 
 ### 4. Prévalider et finaliser
 
@@ -309,7 +305,9 @@ Remplacez cette URL d'exemple par celle de votre instance. Cela ne provoque touj
 ontome-importer review check --session decisions/review.json
 ```
 
-Cette commande fait **la même résolution et la même vérification XSD que la génération**, sans écrire le XML : elle indique soit que le dossier est prêt, soit quelles décisions et données bloquent encore. Si elle est bloquée, reprenez l'étape concernée avec `review resources`, `review assertions`, `review references` ou `review required`, puis relancez `review check`. Un code `0` indique que vous pouvez finaliser :
+Cette commande prend en compte les décisions enregistrées et réécrit **`build/review/review-status.md`**, y compris lorsqu'il reste des décisions en attente (code `3`). Ce rapport partageable présente toutes les ressources et leurs choix, les exclusions motivées, les décisions éditoriales, les blocages examinés avec leurs URI et les prochaines commandes. Les étapes non encore vérifiées sont signalées comme telles. `build/audit/audit.md` reste le diagnostic initial et n'est pas modifié. Pour choisir un autre emplacement, utilisez `review check --output chemin/rapport.md`.
+
+Quand les décisions préalables sont complètes, `review check` fait **la même résolution et la même vérification XSD que la génération**, sans écrire le XML. Si elle est bloquée, reprenez l'étape concernée avec `review resources`, `review assertions`, `review references` ou `review required`, puis relancez `review check` pour actualiser le rapport. Un code `0` indique que vous pouvez finaliser :
 
 ```bash
 ontome-importer review finalize \
@@ -357,6 +355,8 @@ Le XML et ses rapports sont prêts à transmettre seulement lorsque `build/impor
 ```json
 "valid": true
 ```
+
+Chargez ensuite `build/import/import.xml` depuis l'interface du projet OntoME voulu. OntoME associe l'import au namespace racine de ce projet et crée l'ID de la nouvelle version ; ne modifiez pas le XML pour y ajouter un ID de projet ou de namespace cible.
 
 ## Comprendre les retours
 

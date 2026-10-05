@@ -115,9 +115,11 @@ def verify_source_checksum(manifest: dict[str, object], source_path: Path) -> No
 
 def target_identity(manifest: dict[str, object]) -> dict[str, object] | None:
     target = manifest["target"]
-    if "ontome_namespace_id" not in target:
-        return None
-    return {"ontome_namespace_id": target["ontome_namespace_id"], "namespace_uri": target["namespace_uri"]}
+    identity = {"namespace_uri": target["namespace_uri"]}
+    # Older workspaces recorded an ID that OntoME does not use for uploads.
+    if "ontome_namespace_id" in target:
+        identity["ontome_namespace_id"] = target["ontome_namespace_id"]
+    return identity
 
 
 def verify_capability_xsd(capability: dict[str, object]) -> Path:

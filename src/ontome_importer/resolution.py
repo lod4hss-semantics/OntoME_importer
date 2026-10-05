@@ -343,4 +343,5 @@ def _audit_document(inventory: Inventory, capability: dict[str, object], finding
     xsd = capability["xsd"]
     from ontome_importer.profiles import target_identity
     identity = target_identity(manifest)
-    return {"format_version": "1.2" if identity else "1.1", "source": {"file": inventory.source_file, "sha256": inventory.source_sha256}, "xsd": {"version": xsd["version"], "sha256": xsd["sha256"]}, "strict_ok": not any(item["status"] in {"blocked", "invalid", "configured"} for item in findings), "findings": findings, "counts": dict(sorted(counts.items())), **({"target": identity} if identity else {})}
+    legacy_target = "ontome_namespace_id" in identity
+    return {"format_version": "1.2" if legacy_target else "1.3", "source": {"file": inventory.source_file, "sha256": inventory.source_sha256}, "xsd": {"version": xsd["version"], "sha256": xsd["sha256"]}, "strict_ok": not any(item["status"] in {"blocked", "invalid", "configured"} for item in findings), "findings": findings, "counts": dict(sorted(counts.items())), "target": identity}

@@ -29,6 +29,7 @@ from ontome_importer.ontome_catalog import NamespaceBinding, OntoMECatalogError,
 from ontome_importer.package_resources import package_resource_path
 from ontome_importer.profiles import ProfileError, load_audit_profiles, load_generation_profiles, target_identity, validate_generation_mapping, verify_capability_xsd, verify_source_checksum
 from ontome_importer.review import active_dependencies, build_review_queue, load_session, new_session, record_choice, refresh_session, save_session, status
+from ontome_importer.review_report import render_review_report, save_review_report
 from ontome_importer.resolution import resolve_generation
 from ontome_importer.validator import validate_generation
 from ontome_importer.workspace import WorkspaceError, initialize_workspace
@@ -86,7 +87,6 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--workspace", required=True, help="New workspace directory to create.")
     init.add_argument("--format", choices=("turtle", "rdfxml", "ntriples"), help="RDF source format; inferred from a known extension when omitted.")
     init.add_argument("--scope-uri-prefix", action="append", help="URI prefix to include in the import scope; repeat for multiple prefixes.")
-    init.add_argument("--target-ontome-namespace", help="Existing OntoME namespace/version ID or page URL; prompted when omitted in a terminal.")
     init.add_argument("--target-namespace-uri", help="RDF namespace URI, if the source ontology does not specify it unambiguously.")
     init.add_argument("--target-label", help="Target namespace label, if unavailable from the RDF source.")
     init.add_argument("--target-label-lang", help="Language of --target-label (default: en).")
@@ -145,6 +145,7 @@ def build_parser() -> argparse.ArgumentParser:
     review_check = review_commands.add_parser("check", help="Report decisions that still block finalization.")
     review_check.add_argument("--session", default="decisions/review.json", help="Path to the review session.")
     review_check.add_argument("--manifest", help="Generation manifest; inferred from the review session if omitted.")
+    review_check.add_argument("--output", help="Markdown review report path (default: <workspace>/build/review/review-status.md).")
     review_finalize = review_commands.add_parser("finalize", help="Compile reviewed decisions into internal transformation profiles.")
     review_finalize.add_argument("--manifest", required=True, help="Path to the generation import manifest.")
     review_finalize.add_argument("--session", default="decisions/review.json", help="Path to the review session.")
@@ -169,12 +170,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def _run_init(args: argparse.Namespace) -> int:
     try:
-        target = args.target_ontome_namespace
-        if target is None:
-            if not sys.stdin.isatty():
-                raise WorkspaceError("Provide --target-ontome-namespace (an existing OntoME namespace ID or URL) when running without a terminal")
-            target = input("URL ou ID du namespace/version OntoME cible déjà créé : ").strip()
-        namespace_id = parse_target_namespace(target)
         command = initialize_workspace(
             Path(args.source),
             Path(args.workspace),
@@ -184,10 +179,8 @@ def _run_init(args: argparse.Namespace) -> int:
             args.target_label,
             args.target_label_lang,
             args.target_version,
-            namespace_id,
         )
         print("Workspace created.")
-        print(f"OntoME target namespace ID: {namespace_id}")
         _next_steps(("Audit the RDF source and prepare the review queue.", command))
         return 0
     except (WorkspaceError, OntoMECatalogError, RdfLoadError, OSError, ProfileError, EOFError) as error:
@@ -543,24 +536,33 @@ def _run_review(args: argparse.Namespace) -> int:
             )
             return 0
         if args.review_command == "check":
+            workspace = session_path.parent.parent if session_path.parent.name == "decisions" else session_path.parent
+            report_path = Path(args.output) if args.output else workspace / "build/review/review-status.md"
+
+            def finish(code: int, state: str, *, assertion_groups=None, owl_groups=None, blockers=None) -> int:
+                save_review_report(report_path, render_review_report(session, session_path, state, assertion_groups=assertion_groups, owl_groups=owl_groups, blockers=blockers))
+                print(f"Current review report: {report_path}")
+                return code
+
             review_status = status(session)
             if session.get("assertion_policy") == "strict" and _active_ignored_decisions(session):
                 print("Review incomplete: strict policy conflicts with existing ignored assertions. Reconsider these decisions in review assertions/references.")
                 _next_steps(("Revise ignored assertions.", _review_command("assertions", session_path)), ("Revise ignored external relations.", _review_command("references", session_path)))
-                return 3
+                return finish(3, "strict")
             pending = review_status["resources"]["pending"]
             if pending:
                 print(f"Review incomplete: {pending} resource decisions pending. Run review resources.")
                 _next_steps(("Decide pending resources.", _review_command("resources", session_path)))
-                return 3
+                return finish(3, "pending")
             if not review_status["resources"]["publish"]:
                 print("Review incomplete: no classes or properties selected for publication.")
                 _next_steps(("Select at least one class or property to publish.", _review_command("resources", session_path)))
-                return 3
+                return finish(3, "no_publication")
             manifest = Path(args.manifest or session.get("manifest_path") or session_path.parent.parent / "config/generation.yaml")
             profiles = load_generation_profiles(manifest)
             inventory = _review_inventory(manifest, profiles)
-            for (field, motifs), uris in _owl_review_groups(session, inventory):
+            owl_groups = _owl_review_groups(session, inventory)
+            for (field, motifs), uris in owl_groups:
                 print(f"OWL review: {field} / {', '.join(motifs)}: {len(uris)} properties: {', '.join(uris)}. Run review required.")
             mapping, registry = _compile_review(session, inventory, profiles)
             groups = _assertion_groups(session, audit_inventory(inventory, profiles.capability, {**mapping, "ignored_assertions": []}, registry), inventory)
@@ -572,13 +574,13 @@ def _run_review(args: argparse.Namespace) -> int:
                 if _owl_review_groups(session, inventory):
                     options.append(("For OWL domain/range constructions, choose a replacement or exclude the affected properties.", _review_command("required", session_path)))
                 _next_steps(*options)
-                return 3
+                return finish(3, "assertions", assertion_groups=groups, owl_groups=owl_groups)
             dependencies = review_status["dependencies"]
             if dependencies["configured"] != dependencies["total"]:
                 print(f"Review incomplete: {dependencies['configured']}/{dependencies['total']} references configured. Run review references.")
                 _print_unresolved_dependencies(session)
                 _next_steps(("Resolve or omit the external relations listed above.", _review_command("references", session_path)))
-                return 3
+                return finish(3, "references", owl_groups=owl_groups)
             blockers = _preflight(inventory, profiles, mapping, registry)
             if blockers:
                 _print_review_blockers(blockers)
@@ -587,10 +589,10 @@ def _run_review(args: argparse.Namespace) -> int:
                     ("Revisit assertions or external references if these are the reported blockers.", _review_command("assertions", session_path)),
                     ("Exclude a resource that cannot be published with its current assertions.", _review_command("resources", session_path)),
                 )
-                return 3
+                return finish(3, "blockers", owl_groups=owl_groups, blockers=blockers)
             print("Review is ready for generation.")
             _next_steps(("Compile the approved decisions into generation profiles.", f"ontome-importer review finalize --manifest {_shell_path(manifest)} --session {_shell_path(session_path)}"))
-            return 0
+            return finish(0, "ready")
         if args.review_command == "finalize":
             manifest_path = Path(args.manifest)
             profiles = load_generation_profiles(manifest_path)

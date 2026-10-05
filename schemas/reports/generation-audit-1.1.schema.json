@@ -5,7 +5,7 @@
   "additionalProperties": false,
   "required": ["format_version", "source", "xsd", "strict_ok", "findings", "counts"],
   "properties": {
-    "format_version": {"enum": ["1.1", "1.2"]},
+    "format_version": {"enum": ["1.1", "1.2", "1.3"]},
     "target": {"$ref": "#/$defs/target"},
     "source": {"type": "object", "required": ["file", "sha256"], "properties": {"file": {"type": "string"}, "sha256": {"type": "string"}}, "additionalProperties": false},
     "xsd": {"type": "object", "required": ["version", "sha256"], "properties": {"version": {"type": "string"}, "sha256": {"type": "string"}}, "additionalProperties": false},
@@ -13,6 +13,6 @@
     "findings": {"type": "array", "items": {"type": "object", "required": ["status", "category"], "properties": {"status": {"enum": ["mapped", "resolved", "configured", "excluded", "blocked", "invalid"]}, "category": {"enum": ["mechanical_transformation", "intentional_exclusion", "editorial_replacement", "configuration_required", "missing_profile_rule", "missing_external_data", "forbidden_external_namespace", "ambiguous_source_data", "incomplete_source_data", "invalid_source_data", "unsupported_rdf_construct", "invalid_profile"]}}}},
     "counts": {"type": "object", "additionalProperties": {"type": "integer"}}
   },
-  "allOf": [{"if": {"properties": {"format_version": {"const": "1.2"}}}, "then": {"required": ["target"]}}],
-  "$defs": {"target": {"type": "object", "additionalProperties": false, "required": ["ontome_namespace_id", "namespace_uri"], "properties": {"ontome_namespace_id": {"type": "integer", "minimum": 1}, "namespace_uri": {"type": "string", "format": "uri"}, "catalog_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}}}
+  "allOf": [{"if": {"properties": {"format_version": {"const": "1.2"}}}, "then": {"required": ["target"]}}, {"if": {"properties": {"format_version": {"const": "1.3"}}}, "then": {"required": ["target"]}}],
+  "$defs": {"target": {"type": "object", "additionalProperties": false, "required": ["namespace_uri"], "properties": {"ontome_namespace_id": {"type": "integer", "minimum": 1}, "namespace_uri": {"type": "string", "format": "uri"}, "catalog_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}}}
 }

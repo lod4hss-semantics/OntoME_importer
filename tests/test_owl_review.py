@@ -25,7 +25,7 @@ def _workspace(tmp_path, properties=2, anonymous_field="domain"):
 {chr(10).join(declarations)}
 ''')
     workspace = tmp_path / "workspace"
-    assert main(["init", "--source", str(source), "--workspace", str(workspace), "--target-ontome-namespace", "427"]) == 0
+    assert main(["init", "--source", str(source), "--workspace", str(workspace)]) == 0
     return workspace
 
 
@@ -55,6 +55,11 @@ def test_required_can_replace_a_union_or_exclude_an_intersection(tmp_path, monke
     session, manifest = _start(workspace)
     assert main(["review", "check", "--session", str(session)]) == 3
     assert "OWL review: hasDomain" in capsys.readouterr().out
+    report_path = workspace / "build/review/review-status.md"
+    waiting = report_path.read_text()
+    assert "OWL domain/range constructions awaiting review" in waiting
+    assert ROOT + "p1" in waiting and ROOT + "p2" in waiting
+    assert "Assertion groups awaiting a decision" in waiting
     answers = iter(["b", "Unsupported intersection", "y", "r", "p", ROOT + "Person", "y", "Approved simplification"])
     monkeypatch.setattr("builtins.input", lambda _: next(answers))
     assert main(["review", "required", "--session", str(session), "--reviewer", "Curator"]) == 0
@@ -62,6 +67,10 @@ def test_required_can_replace_a_union_or_exclude_an_intersection(tmp_path, monke
     assert choices["required"][ROOT + "p1"]["hasDomain"]["reference_uri"] == ROOT + "Person"
     assert choices["resources"][ROOT + "p2"] == "exclude"
     assert main(["review", "check", "--session", str(session)]) == 0
+    ready = report_path.read_text()
+    assert "Ready to finalize" in ready
+    assert "Approved simplification" in ready and "Unsupported intersection" in ready
+    assert "OWL domain/range constructions awaiting review" not in ready
     assert main(["review", "finalize", "--manifest", str(manifest), "--session", str(session)]) == 0
     assert main(["generate", "--manifest", str(manifest), "--output-dir", str(workspace / "build/import")]) == 0
     xml = (workspace / "build/import/import.xml").read_text()

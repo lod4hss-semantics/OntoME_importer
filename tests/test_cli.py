@@ -107,7 +107,7 @@ rules: []
 def test_audit_guides_review_only_when_decisions_are_required(tmp_path, capsys):
     source = Path(__file__).resolve().parents[1] / "fixtures/e2e/minimal.ttl"
     workspace = tmp_path / "my-import"
-    assert main(["init", "--source", str(source), "--workspace", str(workspace), "--target-ontome-namespace", "427"]) == 0
+    assert main(["init", "--source", str(source), "--workspace", str(workspace)]) == 0
     capsys.readouterr()
     manifest = workspace / "config/audit.yaml"
     assert main(["audit", "--manifest", str(manifest), "--output-dir", str(workspace / "build/audit")]) == 0
@@ -120,7 +120,7 @@ def test_audit_guides_review_only_when_decisions_are_required(tmp_path, capsys):
 def test_audit_ready_offers_generation_or_review(tmp_path, monkeypatch, capsys):
     source = Path(__file__).resolve().parents[1] / "fixtures/e2e/minimal.ttl"
     workspace = tmp_path / "my-import"
-    assert main(["init", "--source", str(source), "--workspace", str(workspace), "--target-ontome-namespace", "427"]) == 0
+    assert main(["init", "--source", str(source), "--workspace", str(workspace)]) == 0
     capsys.readouterr()
     monkeypatch.setattr(cli, "audit_inventory", lambda inventory, *_: AuditReport(inventory, (), ()))
     assert main(["audit", "--manifest", str(workspace / "config/audit.yaml"), "--output-dir", str(workspace / "build/audit")]) == 0
@@ -143,7 +143,7 @@ def test_review_guides_pending_resources_and_owl_blockers(tmp_path, capsys):
 ''')
     workspace = tmp_path / "my-import"
     session = workspace / "decisions/review.json"
-    assert main(["init", "--source", str(source), "--workspace", str(workspace), "--target-ontome-namespace", "427"]) == 0
+    assert main(["init", "--source", str(source), "--workspace", str(workspace)]) == 0
     assert main(["review", "start", "--manifest", str(workspace / "config/generation.yaml"), "--session", str(session)]) == 0
     output = capsys.readouterr().out
     assert f"ontome-importer review resources --session {session}" in output
@@ -156,3 +156,64 @@ def test_review_guides_pending_resources_and_owl_blockers(tmp_path, capsys):
     output = capsys.readouterr().out
     assert "OWL review:" in output and "ontome-importer review required" in output
     assert "ontome-importer review assertions" in output
+
+
+def test_review_check_refreshes_shareable_report_without_changing_initial_audit(tmp_path, capsys):
+    source = Path(__file__).resolve().parents[1] / "fixtures/e2e/minimal.ttl"
+    workspace = tmp_path / "workspace"
+    session = workspace / "decisions/review.json"
+    assert main(["init", "--source", str(source), "--workspace", str(workspace)]) == 0
+    assert main(["audit", "--manifest", str(workspace / "config/audit.yaml"), "--output-dir", str(workspace / "build/audit")]) == 0
+    original_audit = (workspace / "build/audit/audit.md").read_bytes()
+    assert main(["review", "start", "--manifest", str(workspace / "config/generation.yaml"), "--session", str(session)]) == 0
+    capsys.readouterr()
+    assert main(["review", "check", "--session", str(session)]) == 3
+    report = workspace / "build/review/review-status.md"
+    initial = report.read_text()
+    assert f"Current review report: {report}" in capsys.readouterr().out
+    assert "Resource decisions pending" in initial and "## Resource decisions" in initial
+    assert "preflight checks were deferred" in initial
+    choices = json.loads(session.read_text())["choices"]["resources"]
+    uri = next(iter(choices))
+    assert main(["review", "resources", "--session", str(session), "--resource", uri, "--action", "exclude", "--reason", "Out of scope for this publication"]) == 0
+    assert main(["review", "check", "--session", str(session)]) == 3
+    updated = report.read_text()
+    assert updated != initial
+    assert f"`{uri}` | exclude | Out of scope for this publication" in updated
+    assert f"Resources awaiting a decision ({len(choices) - 1})" in updated
+    assert (workspace / "build/audit/audit.md").read_bytes() == original_audit
+
+
+def test_review_check_accepts_an_explicit_report_path(tmp_path):
+    source = Path(__file__).resolve().parents[1] / "fixtures/e2e/minimal.ttl"
+    workspace = tmp_path / "workspace"
+    session = workspace / "decisions/review.json"
+    assert main(["init", "--source", str(source), "--workspace", str(workspace)]) == 0
+    assert main(["review", "start", "--manifest", str(workspace / "config/generation.yaml"), "--session", str(session)]) == 0
+    report = tmp_path / "for-colleagues/review.md"
+    assert main(["review", "check", "--session", str(session), "--output", str(report)]) == 3
+    assert "Resource decisions pending" in report.read_text()
+    assert not (workspace / "build/review/review-status.md").exists()
+
+
+def test_review_check_report_lists_preflight_blockers_with_all_affected_uris(tmp_path):
+    source = tmp_path / "source.ttl"
+    source.write_text('''@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+<https://example.org/model/> a owl:Ontology ; rdfs:label "Model"@en .
+<https://example.org/model/Person> a owl:Class ; rdfs:label "Person"@en .
+<https://example.org/model/p1> a owl:ObjectProperty ; rdfs:label "p1"@en ; rdfs:domain <https://example.org/model/Person> .
+<https://example.org/model/p2> a owl:ObjectProperty ; rdfs:label "p2"@en ; rdfs:domain <https://example.org/model/Person> .
+''')
+    workspace = tmp_path / "workspace"
+    session = workspace / "decisions/review.json"
+    assert main(["init", "--source", str(source), "--workspace", str(workspace)]) == 0
+    assert main(["review", "start", "--manifest", str(workspace / "config/generation.yaml"), "--session", str(session)]) == 0
+    assert main(["review", "resources", "--session", str(session), "--action", "publish"]) == 0
+    assert main(["review", "check", "--session", str(session)]) == 3
+    report = (workspace / "build/review/review-status.md").read_text()
+    assert "Generation preflight blocked" in report
+    assert "Generation blockers" in report
+    assert "`https://example.org/model/p1`" in report
+    assert "`https://example.org/model/p2`" in report
+    assert "ontome-importer review required" in report
