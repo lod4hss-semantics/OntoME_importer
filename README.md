@@ -35,7 +35,7 @@ ontome-importer --help
 ontome-importer --version
 ```
 
-`init` creates a new import workspace. `audit` inventories the RDF and prepares a review queue. `review resources`, `review assertions`, `review references` and `review required` record distinct decisions locally in the terminal. `review check` prevalidates the compiled result before `finalize`; `generate` and `validate` use the versioned manifest and capability contracts. Follow the [User Guide](docs/user-guide.md) for the full workflow, files produced and exit codes.
-Create the target namespace/version in OntoME first. `init` records its existing ID or page URL without querying the target API.
+`init` creates a new import workspace. `audit` inventories the RDF and prepares a review queue. `review resources`, `review assertions`, `review references` and `review required` record distinct decisions locally in the terminal. `review check` writes a shareable review status report and prevalidates the compiled result before `finalize`; `generate` and `validate` use the versioned manifest and capability contracts. Follow the [User Guide](docs/user-guide.md) for the full workflow, files produced and exit codes.
+Create the OntoME project that will receive the import and ensure it has a root namespace. Upload the generated XML from that project's UI; `init` does not require a project or target namespace ID.
 
 ## Legacy Material

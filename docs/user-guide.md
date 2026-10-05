@@ -201,7 +201,7 @@ Le fichier `README.md` de ce dossier répète les prochaines commandes avec les 
 | --- | --- |
 | `source/ontology.<extension-rdf>` | Copie de votre ontologie ; l'extension d'origine est conservée et c'est le RDF utilisé par l'import. |
 | `config/audit.yaml` | Fichier de départ pour la première analyse. |
-| `config/generation.yaml` | ID et URI déclarés de la cible OntoME et chemins des profils de génération. |
+| `config/generation.yaml` | URI RDF, libellés et version de l'ontologie à importer, ainsi que les chemins des profils de génération. |
 | `capability-*.yaml` | Paramètres techniques fournis par l'outil pour le XSD OntoME. Vous ne les modifiez normalement pas au début. |
 | `namespace-registry.yaml` | Registre technique généré par la revue pour les références externes réellement conservées. |
 | `mapping-audit.yaml` | Définit le périmètre du premier audit. |
@@ -315,7 +315,7 @@ ontome-importer review finalize \
   --session decisions/review.json
 ```
 
-`finalize` refait le précontrôle avant d'écrire les profils techniques dans `config/profiles/`. Les décisions métier restent dans la session ; il n'est pas nécessaire d'éditer les fichiers YAML. Le choix de la cible OntoME reste déclaratif. Une construction OWL que le XML ne sait pas représenter peut être omise après décision explicite, mais cela ne rend pas les deux ontologies sémantiquement équivalentes.
+`finalize` refait le précontrôle avant d'écrire les profils techniques dans `config/profiles/`. Les décisions métier restent dans la session ; il n'est pas nécessaire d'éditer les fichiers YAML. L'URI du namespace à importer reste déclarative ; le projet OntoME est choisi seulement lors de l'upload. Une construction OWL que le XML ne sait pas représenter peut être omise après décision explicite, mais cela ne rend pas les deux ontologies sémantiquement équivalentes.
 
 ### 5. Générer
 

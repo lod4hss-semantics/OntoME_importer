@@ -2,7 +2,7 @@
 
 Run `ontome-importer init` before editing these files. It creates the audit and generation manifests plus the profile templates in a new workspace. This page explains the fields that the import team completes after reading the first audit report.
 
-The standard workflow uses `ontome-importer review`, a local terminal session. It records human decisions, then `review finalize` writes the internal transformation profile and namespace registry used by generation. Generation never reads an interactive session directly. The manifest identifies inputs and target metadata, the transformation profile defines mechanical serialization, and the registry provides external namespace data.
+The standard workflow uses `ontome-importer review`, a local terminal session. It records human decisions, then `review finalize` writes the internal transformation profile and namespace registry used by generation. Generation never reads an interactive session directly. The manifest identifies inputs and the RDF namespace URI to import, the transformation profile defines mechanical serialization, and the registry provides external namespace data.
 
 The review session is the human decision surface. Its queue and its compiled profiles are separate: reports are read-only evidence and only confirmed terminal decisions are compiled.
 
@@ -10,13 +10,13 @@ The review downloads an RDF catalog only after the user confirms an OntoME depen
 
 ## Audit Profiles
 
-Audit uses manifest 1.1, capability profile 1.1, namespace registry 1.0, and mapping profile 1.1. Scope selectors are ORed; conditions in a selector are ANDed. Mapping 1.1 is audit-only and its generic map targets never authorize XML generation.
+New workspaces use audit manifest 1.3, capability profile 1.1, namespace registry 1.1, and mapping profile 1.1. Scope selectors are ORed; conditions in a selector are ANDed. Mapping 1.1 is audit-only and its generic map targets never authorize XML generation.
 
 `exclude` requires a human-readable `reason`. `configure` requires `decision_needed`. Unknown constructions are blocked by default.
 
 ## Generation Profiles
 
-New workspaces use audit manifest 1.2 and generation manifest 1.1, with the existing capability profiles, namespace registry 1.1, and an internal transformation profile 7.0 compiled by the review. The target namespace requires an OntoME ID, the RDF URI and a localized label. No target export or target API call is required. Earlier manifests remain readable for existing fixtures.
+New workspaces use generation manifest 1.2, with the existing capability profiles, namespace registry 1.1, and an internal transformation profile 7.0 compiled by the review. The target records the RDF URI, localized labels and an optional version. The OntoME project and its root namespace are selected by the upload UI, not by the manifest or XML. No target export or target API call is required. Earlier manifests containing a target namespace ID remain readable as legacy metadata.
 
 ## Decision Journal
 
