@@ -1,4 +1,5 @@
 import json
+from copy import deepcopy
 from pathlib import Path
 
 from jsonschema import Draft202012Validator
@@ -34,6 +35,26 @@ def test_generation_resolves_writes_valid_xml_and_complete_trace(tmp_path):
     audit_schema = json.loads((ROOT / "schemas/reports/generation-audit-1.1.schema.json").read_text())
     assert list(Draft202012Validator(trace_schema).iter_errors(trace)) == []
     assert list(Draft202012Validator(audit_schema).iter_errors(result.audit)) == []
+
+
+def test_namespace_version_label_is_not_duplicated_and_missing_version_keeps_base_label():
+    profiles = load_generation_profiles(FIXTURES / "import-manifest.yaml")
+    inventory = load_inventory(FIXTURES / "rdf/valid.ttl", "turtle")
+    for label, version, expected in (
+        ("CRMsci", "3.2", "CRMsci version 3.2"),
+        ("CRMsci version 3.2", "3.2", "CRMsci version 3.2"),
+        ("CRMsci 3.2", "3.2", "CRMsci 3.2"),
+        ("CRMsci", None, "CRMsci"),
+    ):
+        manifest = deepcopy(profiles.manifest)
+        manifest["target"]["labels"] = [{"lang": "en", "value": label}]
+        manifest["target"]["version"] = version
+        result = resolve_generation(inventory, manifest, profiles.capability, profiles.mapping, profiles.namespace_registry)
+        assert result.generation is not None
+        xml, _ = write_xml(result.generation, profiles.capability, verify_capability_xsd(profiles.capability), inventory.source_sha256)
+        document = etree.fromstring(xml)
+        assert document.xpath("/namespace/standardLabel/text()") == [expected]
+        assert document.xpath("/namespace/version/text()") == ([version] if version else [])
 
 
 def test_generation_is_byte_deterministic(tmp_path):
@@ -185,3 +206,44 @@ ex:Beta a owl:Class ; rdfs:label "Beta"@en .
     document = etree.fromstring(xml)
     assert document.xpath("/namespace/classes/class[identifierInNamespace='Alpha']/disjointWith/text()") == ["Beta"]
     assert [element.tag for element in document.xpath("/namespace/classes/class[identifierInNamespace='Alpha']/textProperties/*")] == ["scopeNote", "example", "contextNote", "bibliographicalNote"]
+
+
+def test_generation_collapses_a_reviewed_inverse_pair_and_traces_shared_labels(tmp_path):
+    source = tmp_path / "inverse.ttl"
+    source.write_text(
+        """@prefix ex: <https://example.org/source/> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+ex:Class a owl:Class ; rdfs:label "Class"@en .
+ex:Forward a owl:ObjectProperty ; rdfs:label "forward"@en, "avant"@fr ; owl:inverseOf ex:Reverse ; rdfs:domain ex:Class ; rdfs:range ex:Class .
+ex:Reverse a owl:ObjectProperty ; rdfs:label "reverse"@en, "ruckwarts"@de ; rdfs:domain ex:Class ; rdfs:range ex:Class .
+""",
+        encoding="utf-8",
+    )
+    profiles = load_generation_profiles(FIXTURES / "import-manifest.yaml")
+    mapping = deepcopy(profiles.mapping)
+    mapping["rules"] = [dict(rule) for rule in mapping["rules"]]
+    object_rule = next(rule for rule in mapping["rules"] if rule["id"] == "map-object-property")
+    object_rule["selector"] = {"uri": "https://example.org/source/Forward"}
+    mapping["rules"].append({"id": "exclude-reverse", "selector": {"uri": "https://example.org/source/Reverse"}, "action": "exclude", "reason": "Collapsed into the retained inverse pair."})
+    mapping["inverse_pairs"] = [{
+        "id": "inverse-forward-reverse",
+        "retained_uri": "https://example.org/source/Forward",
+        "inverse_uri": "https://example.org/source/Reverse",
+        "triple_ids": ["triple-placeholder"],
+        "decision_id": "inverse-decision",
+    }]
+    inventory = load_inventory(source, "turtle")
+    result = resolve_generation(inventory, profiles.manifest, profiles.capability, mapping, profiles.namespace_registry)
+    assert result.generation is not None
+    xml, trace = write_xml(result.generation, profiles.capability, verify_capability_xsd(profiles.capability), inventory.source_sha256)
+    document = etree.fromstring(xml)
+    assert document.xpath("/namespace/properties/property/identifierInNamespace/text()") == ["Forward"]
+    assert document.xpath("/namespace/properties/property/label[@lang='en']/standardLabel/text()") == ["forward"]
+    assert document.xpath("/namespace/properties/property/label[@lang='en']/inverseLabel/text()") == ["reverse"]
+    assert document.xpath("/namespace/properties/property/label[@lang='fr']/inverseLabel") == []
+    assert document.xpath("//inverseOf") == []
+    inverse_entries = [entry for entry in trace["entries"] if entry["element"] == "inverseLabel"]
+    assert len(inverse_entries) == 1
+    assert inverse_entries[0]["origin"] == "inverse_property_label"
+    assert inverse_entries[0]["source_resource"]["value"] == "https://example.org/source/Reverse"

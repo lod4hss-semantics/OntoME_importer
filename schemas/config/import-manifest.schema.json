@@ -23,6 +23,7 @@
       "required": ["namespace_uri", "labels"],
       "properties": {
         "namespace_uri": {"type": "string", "format": "uri"},
+        "import_namespace_uri": {"type": "string", "format": "uri"},
         "ontome_namespace_id": {"type": "integer", "minimum": 1},
         "catalog": {"type": "string", "minLength": 1},
         "catalog_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},

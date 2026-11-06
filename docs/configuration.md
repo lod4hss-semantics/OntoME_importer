@@ -16,7 +16,11 @@ New workspaces use audit manifest 1.3, capability profile 1.1, namespace registr
 
 ## Generation Profiles
 
-New workspaces use generation manifest 1.2, with the existing capability profiles, namespace registry 1.1, and an internal transformation profile 7.0 compiled by the review. The target records the RDF URI, localized labels and an optional version. The OntoME project and its root namespace are selected by the upload UI, not by the manifest or XML. No target export or target API call is required. Earlier manifests containing a target namespace ID remain readable as legacy metadata.
+New workspaces use generation manifest 1.2, with the existing capability profiles, namespace registry 1.1, and an internal transformation profile 7.0 compiled by the review. The target records the source RDF URI, localized labels and an optional version. By default the XML omits `namespaceURI`: the active OntoME project's root namespace supplies the URI during import. If an explicit, different URI is needed for the imported version, pass `--import-namespace-uri` to `init`; this records `target.import_namespace_uri` and writes the XML `namespaceURI` element. `--target-namespace-uri` separately selects the source RDF ontology URI when it cannot be inferred. No target export or target API call is required. Earlier manifests containing a target namespace ID remain readable as legacy metadata.
+
+At initialization, the numeric suffix of the ontology's `owl:versionIRI` (for example `/3.2/` or `/v3.2/`) becomes `target.version` and the localized `owl:versionInfo` text becomes `target.descriptions`, exported as the namespace's `<description>` in OntoME XML. An untagged versionInfo uses the target label language. If no versionIRI is present, version remains absent unless `--target-version` is supplied; ambiguous or non-numeric versionIRIs require an explicit override. Existing workspaces can update the generation manifest's `target.version` and `target.descriptions` before regenerating.
+
+The imported version's namespace `standardLabel` is generated as `<base label> version <version>` (for example, `CRMsci version 3.2`). If the base label already contains that version number, it is left unchanged; without a version, the base label is kept. The XML `version` field stays numeric, and `description` still contains `owl:versionInfo`. The manifest retains the base label so that future version imports can reuse it.
 
 ## Decision Journal
 
@@ -38,7 +42,9 @@ target:
 
 An identifier uses an explicit strategy: `uri_suffix` with `strip_prefix`, `literal_predicate` with one literal predicate value, or `regex_capture` with a full URI pattern and exactly one capture group. There is no core default. A configured identifier predicate is consumed by generation; unconfigured predicates remain blocked by the audit.
 
-Class rules may configure `subClassOf`, `equivalentClass`, and `disjointWith`. Property rules require `domain_range` and may configure `subPropertyOf`, `equivalentProperty`, and `inverseOf`. Text assertions are emitted only through explicit `text_fields`; `rdfs:comment` has no implicit XML destination. Parent relations, inverse labels, and quantifiers remain blocked because no generic RDF transformation contract is defined for them.
+Terminal review compiles a `regex_capture` for local CIDOC-style identifiers such as `S10_Material_Substantial` and `O37_expressed_the_observed_as_observable_proposition`: OntoME receives the code (`S10` or `O37`) in `identifierInNamespace` and retains the full URI in `identifierInURI`. The same code is used for all local class and property references. Other URI suffixes keep the existing `uri_suffix` mapping.
+
+Class rules may configure `subClassOf`, `equivalentClass`, and `disjointWith`. Property rules require `domain_range` and may configure `subPropertyOf`, `equivalentProperty`, and `inverseOf`. Text assertions are emitted only through explicit `text_fields` or `comment_sections`; `rdfs:comment` has no implicit XML destination. Reviewed inverse property pairs are represented by the retained property's `inverseLabel`; the inverse property's other fields are not exported. Parent relations remain unsupported without an explicit mapping.
 
 ```yaml
 text_fields:
@@ -46,6 +52,16 @@ text_fields:
     predicates:
       - http://www.w3.org/2000/01/rdf-schema#comment
 ```
+
+For CIDOC CRM editorial comments, `review assertions` offers `[d]` when all comments in the group can be parsed. Approval compiles an opt-in rule on each retained class or property:
+
+```yaml
+comment_sections:
+  predicate: http://www.w3.org/2000/01/rdf-schema#comment
+  format: cidoc_crm_ea
+```
+
+`Scope note:` becomes `scopeNote`; the `- ` entries under `Examples:` are combined as an HTML `<ul><li>…</li></ul>` list in one `example` text element per source comment. The XML escapes the HTML markup as text, which OntoME's TinyMCE rich-text field interprets; individual example text is HTML-escaped before insertion. `Full path:` and `In First Order Logic:` are omitted with the reviewer's recorded rationale. On retained properties, the E-A notation `(range min,max:domain min,max)` becomes the XSD's UML-end quantifier fields: `rangeInstancesMin/MaxQuantifier` from the first pair, `domainInstancesMin/MaxQuantifier` from the second. For example, `(1,1:0,n)` means one range instance per domain instance, and zero to n domain instances per range instance. Comments with missing or ambiguous sections require individual review. Only the retained property's comment is processed; the inverse contributes its label only. All resulting XML elements trace back to the source comment triple. In `review inverses`, `[a]` retains the first property of every remaining pair without changing decisions already recorded.
 
 Exact URI-to-OntoME mappings remain available for exceptions:
 

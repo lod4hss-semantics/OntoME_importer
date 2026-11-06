@@ -22,13 +22,14 @@ from jsonschema import Draft202012Validator, FormatChecker
 
 from ontome_importer import __version__
 from ontome_importer.audit import audit_inventory
+from ontome_importer.comment_sections import parse_cidoc_comment
 from ontome_importer.constructs import OWL, RDFS, anonymous_domain_ranges
 from ontome_importer.external_references import ExternalReferenceError, resolve_external_reference, validate_external_reference_configuration
 from ontome_importer.loader import RdfLoadError, load_inventory
 from ontome_importer.ontome_catalog import NamespaceBinding, OntoMECatalogError, fetch_namespace_catalog, parse_target_namespace, resolve_namespace_binding, catalog_identifiers
 from ontome_importer.package_resources import package_resource_path
 from ontome_importer.profiles import ProfileError, load_audit_profiles, load_generation_profiles, target_identity, validate_generation_mapping, verify_capability_xsd, verify_source_checksum
-from ontome_importer.review import active_dependencies, build_review_queue, load_session, new_session, record_choice, refresh_session, save_session, status
+from ontome_importer.review import active_dependencies, build_review_queue, load_session, new_session, record_choice, refresh_session, review_resource_sets, save_session, status
 from ontome_importer.review_report import render_review_report, save_review_report
 from ontome_importer.resolution import resolve_generation
 from ontome_importer.validator import validate_generation
@@ -56,13 +57,17 @@ def _review_command(stage: str, session_path: Path) -> str:
 
 def _review_next_steps(session: dict[str, object], session_path: Path, *, assertions_pending: int | None = None) -> None:
     progress = status(session)
+    inverse_pending = [pair for pair in session["queue"].get("inverse_pairs", []) if pair["id"] not in session["choices"].get("inverse_pairs", {})]
     if progress["resources"]["pending"]:
         _next_steps(
             (f"Decide the {progress['resources']['pending']} pending resource(s).", _review_command("resources", session_path)),
             ("Inspect progress and remaining decisions.", _review_command("check", session_path)),
         )
         return
-    if not progress["resources"]["publish"]:
+    if inverse_pending:
+        _next_steps((f"Choose the retained property for {len(inverse_pending)} inverse pair(s).", _review_command("inverses", session_path)))
+        return
+    if not progress["resources"]["publish"] and not any(decision.get("action") == "retain" for decision in session["choices"].get("inverse_pairs", {}).values()):
         _next_steps(("Select at least one publishable resource.", _review_command("resources", session_path)))
         return
     options = []
@@ -88,9 +93,10 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--format", choices=("turtle", "rdfxml", "ntriples"), help="RDF source format; inferred from a known extension when omitted.")
     init.add_argument("--scope-uri-prefix", action="append", help="URI prefix to include in the import scope; repeat for multiple prefixes.")
     init.add_argument("--target-namespace-uri", help="RDF namespace URI, if the source ontology does not specify it unambiguously.")
+    init.add_argument("--import-namespace-uri", help="Write an explicit namespaceURI in the OntoME XML; by default the active project's root namespace supplies it.")
     init.add_argument("--target-label", help="Target namespace label, if unavailable from the RDF source.")
     init.add_argument("--target-label-lang", help="Language of --target-label (default: en).")
-    init.add_argument("--target-version", help="Target version, if ontology versionInfo is missing or ambiguous.")
+    init.add_argument("--target-version", help="Override the numeric version extracted from owl:versionIRI (or supply one if it is missing or ambiguous).")
     audit = commands.add_parser("audit", help="Audit an RDF ontology and prepare a terminal review queue.")
     audit.add_argument("--manifest", required=True, help="Path to an import manifest 1.1.")
     audit.add_argument("--output-dir", required=True, help="Directory for audit outputs.")
@@ -136,6 +142,9 @@ def build_parser() -> argparse.ArgumentParser:
     review_references.add_argument("--uri", help="Review this external term again, including a previously ignored reference.")
     review_references.add_argument("--reviewer", help="Name recorded with omitted external relations.")
     review_references.add_argument("--ontome-base-url", default="https://ontome.net", help="OntoME instance for a chosen external catalog (only used when fetching).")
+    review_inverses = review_commands.add_parser("inverses", help="Choose the retained property for each owl:inverseOf pair.")
+    review_inverses.add_argument("--session", default="decisions/review.json", help="Path to the review session.")
+    review_inverses.add_argument("--reviewer", help="Name recorded with inverse-pair decisions.")
     review_required = review_commands.add_parser("required", help="Resolve missing mandatory fields or revise resource choices.")
     review_required.add_argument("--manifest", help="Generation manifest; inferred from the review session if omitted.")
     review_required.add_argument("--session", default="decisions/review.json")
@@ -176,6 +185,7 @@ def _run_init(args: argparse.Namespace) -> int:
             args.format,
             args.scope_uri_prefix or [],
             args.target_namespace_uri,
+            args.import_namespace_uri,
             args.target_label,
             args.target_label_lang,
             args.target_version,
@@ -294,16 +304,37 @@ def _run_review(args: argparse.Namespace) -> int:
                 groups = [(args.finding, matches)]
             if args.limit is not None and args.limit < 1:
                 raise ValueError("--limit must be positive")
+            property_uris = {
+                resource.id.value for resource in inventory.resources
+                if any(term.value in {f"{OWL}ObjectProperty", f"{OWL}DatatypeProperty", "http://www.w3.org/1999/02/22-rdf-syntax-ns#Property"} for term in resource.types)
+            }
             for key, findings in groups[:args.limit]:
-                print(f"\n{key}: {len({triple_id for item in findings for triple_id in item['triple_ids']})} assertion(s), {len(findings)} finding(s)\nConstructs: {', '.join(sorted({item['construct'] for item in findings}))}\nExample: {findings[0]['example']}")
+                example = findings[0]["example"]
+                if key == f"{RDFS}comment" and len(example) > 240:
+                    example = example[:240] + "…"
+                print(f"\n{key}: {len({triple_id for item in findings for triple_id in item['triple_ids']})} assertion(s), {len(findings)} finding(s)\nConstructs: {', '.join(sorted({item['construct'] for item in findings}))}\nExample: {example}")
                 examples = [next((triple for triple in inventory.triples if triple.id == item["triple_ids"][0]), None) for item in findings]
                 construct = findings[0]["construct"]
                 fields = {"comment": "contextNote", "scope_note": "scopeNote", "example": "example", "disjointness": "disjointWith"}
                 keep = construct in fields and all(item and item.predicate.value == examples[0].predicate.value and (construct == "disjointness" or item.object.kind == "literal" and item.object.language) for item in examples)
                 transform = all(item and item.object.kind == "literal" and item.object.language for item in examples)
-                print("Choices: " + ("[k]eep in OntoME, " if keep else "") + ("[t]ransform to a note, " if transform else "") + "[i]gnore with reason, [s]kip")
+                parsed_comments = []
+                if construct == "comment" and transform:
+                    for item in examples:
+                        try:
+                            parsed_comments.append(parse_cidoc_comment(item.object.value, property=item.subject.value in property_uris))
+                        except ValueError as error:
+                            print(f"CIDOC section parsing unavailable for {item.subject.value}: {error}")
+                            break
+                can_split = len(parsed_comments) == len(examples) and bool(parsed_comments)
+                if can_split:
+                    print(f"CIDOC preview ({len(parsed_comments)} comment(s)): {len(parsed_comments)} scope note(s), {sum(len(item.examples) for item in parsed_comments)} example entries grouped into {sum(bool(item.examples) for item in parsed_comments)} XML example element(s), {sum(bool(item.quantifiers) for item in parsed_comments)} E-A quantification(s) converted to UML.")
+                    print("First scope note: " + parsed_comments[0].scope_note[:180])
+                    if parsed_comments[0].quantifiers:
+                        print("First UML quantifiers: " + ", ".join(f"{field}={value}" for field, value in parsed_comments[0].quantifiers))
+                print("Choices: " + ("[d]écouper le commentaire CIDOC, " if can_split else "") + ("[k]eep in OntoME, " if keep else "") + ("[t]ransform to a note, " if transform else "") + "[i]gnore with reason, [s]kip")
                 answer = input("Decision: ").strip().lower()
-                if answer not in {"i", "k" if keep else "", "t" if transform else ""}:
+                if answer not in {"i", "d" if can_split else "", "k" if keep else "", "t" if transform else ""}:
                     continue
                 if answer == "i" and session.get("assertion_policy") == "strict":
                     print("Strict policy does not permit omitting assertions.")
@@ -317,17 +348,55 @@ def _run_review(args: argparse.Namespace) -> int:
                     raise ValueError("A reviewer name is required")
                 now = datetime.now(timezone.utc).isoformat()
                 for item in findings:
-                    session["choices"].setdefault("assertions", {})[item["id"]] = {"action": {"i": "ignore", "k": "map", "t": "transform"}[answer], "reason": reason, "reviewer": reviewer, "at": now, "scope": "assertion" if args.finding else "group", "triple_ids": item["triple_ids"]}
-                    if answer in {"k", "t"}:
+                    session["choices"].setdefault("assertions", {})[item["id"]] = {"action": {"i": "ignore", "k": "map", "t": "transform", "d": "transform"}[answer], "reason": reason, "reviewer": reviewer, "at": now, "scope": "assertion" if args.finding else "group", "triple_ids": item["triple_ids"]}
+                    if answer in {"k", "t", "d"}:
                         triple = next(triple for triple in inventory.triples if triple.id == item["triple_ids"][0])
                         uri = (item.get("scope_resource") or item["resource"])["value"]
-                        field = fields[construct] if answer == "k" else "contextNote"
+                        field = "comment_sections" if answer == "d" else fields[construct] if answer == "k" else "contextNote"
                         session["choices"].setdefault("field_mappings", {})[f"{uri}|{triple.predicate.value}"] = {"uri": uri, "predicate": triple.predicate.value, "field": field, "construct": item["construct"], "action": "map" if answer == "k" else "transform", "reason": reason, "reviewer": reviewer, "at": now}
-                session["journal"].append({"action": {"i": "ignore_assertions", "k": "map_assertions", "t": "transform_assertions"}[answer], "at": now, "reviewer": reviewer, "scope": key, "finding_ids": [item["id"] for item in findings], "reason": reason})
+                session["journal"].append({"action": {"i": "ignore_assertions", "k": "map_assertions", "t": "transform_assertions", "d": "split_cidoc_comments"}[answer], "at": now, "reviewer": reviewer, "scope": key, "finding_ids": [item["id"] for item in findings], "reason": reason})
                 save_session(session, session_path)
             remaining = len(_assertion_groups(session, audit_inventory(inventory, profiles.capability, {**mapping, 'ignored_assertions': []}, registry), inventory))
             print(f"Assertion groups requiring a decision: {remaining}")
             _review_next_steps(session, session_path, assertions_pending=remaining)
+            return 0
+        if args.review_command == "inverses":
+            pairs = session["queue"].get("inverse_pairs", [])
+            decisions = session["choices"].setdefault("inverse_pairs", {})
+            for pair in pairs:
+                if pair["id"] in decisions:
+                    continue
+                first, second = pair["uris"]
+                print(f"\nInverse property pair: {first}\n  Labels: {pair['labels'][first] or 'none'}\nInverse property pair: {second}\n  Labels: {pair['labels'][second] or 'none'}")
+                answer = input("[1] retain first, [2] retain second, [a] retain first for all remaining pairs, [e] exclude pair, [s] skip: ").strip().lower()
+                if answer not in {"1", "2", "a", "e"}:
+                    continue
+                reviewer = (args.reviewer or getpass.getuser()).strip()
+                if not reviewer:
+                    raise ValueError("A reviewer name is required")
+                at = datetime.now(timezone.utc).isoformat()
+                reason = None
+                if answer == "e":
+                    reason = input("Reason for excluding this pair: ").strip()
+                    if not reason:
+                        print("A reason is required.")
+                        continue
+                selected_pairs = [item for item in pairs if item["id"] not in decisions] if answer == "a" else [pair]
+                for selected in selected_pairs:
+                    selected_first, selected_second = selected["uris"]
+                    if answer == "e":
+                        decision = {"action": "exclude", "reason": reason, "reviewer": reviewer, "at": at}
+                    else:
+                        retained = selected_second if answer == "2" else selected_first
+                        decision = {"action": "retain", "retained_uri": retained, "inverse_uri": selected_first if retained == selected_second else selected_second, "reviewer": reviewer, "at": at}
+                    decisions[selected["id"]] = decision
+                    session["journal"].append({"action": "inverse_pair_choice", "pair_id": selected["id"], **decision})
+                save_session(session, session_path)
+                if answer == "a":
+                    print(f"Retained the first property for {len(selected_pairs)} remaining inverse pair(s).")
+                    break
+            _print_review_status(status(session))
+            _review_next_steps(session, session_path)
             return 0
         if args.review_command == "references":
             manifest = Path(args.manifest or session.get("manifest_path") or session_path.parent.parent / "config/generation.yaml")
@@ -344,8 +413,9 @@ def _run_review(args: argparse.Namespace) -> int:
                 raise ValueError("--limit must be positive")
             for dependency in dependencies[:args.limit]:
                 uri = dependency["uri"]
+                _, published, collapsed_inverse_triples = review_resource_sets(session)
                 print(f"\nExternal term: {uri}")
-                print("Used by: " + ", ".join(item.subject.value for item in inventory.triples if item.object.kind == "uri" and item.object.value == uri and session["choices"]["resources"].get(item.subject.value) == "publish"))
+                print("Used by: " + ", ".join(item.subject.value for item in inventory.triples if item.object.kind == "uri" and item.object.value == uri and item.subject.value in published and item.id not in collapsed_inverse_triples))
                 answer = input("[i]gnore these relations, [l]ocal catalog, [f]etch catalog, [s]kip: ").strip().lower()
                 if answer == "i":
                     if session.get("assertion_policy") == "strict":
@@ -357,7 +427,7 @@ def _run_review(args: argparse.Namespace) -> int:
                         continue
                     reviewer = (args.reviewer or getpass.getuser()).strip()
                     now = datetime.now(timezone.utc).isoformat()
-                    linked = {item.id for item in inventory.triples if item.object.kind == "uri" and item.object.value == uri and session["choices"]["resources"].get(item.subject.value) == "publish"}
+                    linked = {item.id for item in inventory.triples if item.object.kind == "uri" and item.object.value == uri and item.subject.value in published and item.id not in collapsed_inverse_triples}
                     findings = [item for item in report.findings if item["status"] in {"blocked", "mapped"} and len(item["triple_ids"]) == 1 and item["triple_ids"][0] in linked]
                     for item in findings:
                         session["choices"].setdefault("assertions", {})[item["id"]] = {"action": "ignore", "reason": reason, "reviewer": reviewer, "at": now, "scope": "reference", "triple_ids": item["triple_ids"]}
@@ -414,11 +484,12 @@ def _run_review(args: argparse.Namespace) -> int:
             manifest = Path(args.manifest or session.get("manifest_path") or session_path.parent.parent / "config/generation.yaml")
             profiles = load_generation_profiles(manifest)
             inventory = _review_inventory(manifest, profiles)
+            _, published, _ = review_resource_sets(session)
             mapping, registry = _compile_review(session, inventory, profiles)
             report = audit_inventory(inventory, profiles.capability, mapping, registry)
             for item in report.findings:
                 uri = (item.get("scope_resource") or item["resource"])["value"]
-                if item["construct"] != "missing_label_language" or session["choices"]["resources"].get(uri) != "publish" or mapping.get("ignored_assertions") and item["status"] == "excluded":
+                if item["construct"] != "missing_label_language" or uri not in published or mapping.get("ignored_assertions") and item["status"] == "excluded":
                     continue
                 if session["choices"].get("required", {}).get(uri, {}).get("label_language"):
                     continue
@@ -438,9 +509,10 @@ def _run_review(args: argparse.Namespace) -> int:
             mapping, registry = _compile_review(session, inventory, profiles)
             report = audit_inventory(inventory, profiles.capability, mapping, registry)
             owl_sources = anonymous_domain_ranges(inventory)
-            local_classes = {item.id.value for item in inventory.resources if item.id.kind == "uri" and any(term.value in {f"{OWL}Class", f"{RDFS}Class"} for term in item.types) and session["choices"]["resources"].get(item.id.value) == "publish"}
+            _, published, _ = review_resource_sets(session)
+            local_classes = {item.id.value for item in inventory.resources if item.id.kind == "uri" and any(term.value in {f"{OWL}Class", f"{RDFS}Class"} for term in item.types) and item.id.value in published}
             for (field, motifs), uris in _owl_review_groups(session, inventory):
-                uris = [uri for uri in uris if session["choices"]["resources"].get(uri) == "publish"]
+                uris = [uri for uri in uris if uri in published]
                 if not uris:
                     continue
                 print(f"\n{field} / {', '.join(motifs)}: {len(uris)} published property/properties")
@@ -459,7 +531,7 @@ def _run_review(args: argparse.Namespace) -> int:
                     save_session(session, session_path)
                 elif answer == "r":
                     for uri in uris:
-                        if session["choices"]["resources"].get(uri) != "publish":
+                        if uri not in published:
                             continue
                         source = owl_sources[(uri, field)]
                         if session["choices"].get("required", {}).get(uri, {}).get(field):
@@ -498,7 +570,7 @@ def _run_review(args: argparse.Namespace) -> int:
             triples = {(triple.subject.value, triple.predicate.value) for triple in inventory.triples}
             for item in report.findings:
                 uri = (item.get("scope_resource") or item["resource"])["value"]
-                if item["construct"] not in {"missing_domain", "missing_range"} or session["choices"]["resources"].get(uri) != "publish":
+                if item["construct"] not in {"missing_domain", "missing_range"} or uri not in published:
                     continue
                 field = "hasDomain" if item["construct"] == "missing_domain" else "hasRange"
                 predicate = "http://www.w3.org/2000/01/rdf-schema#" + ("domain" if field == "hasDomain" else "range")
@@ -554,7 +626,21 @@ def _run_review(args: argparse.Namespace) -> int:
                 print(f"Review incomplete: {pending} resource decisions pending. Run review resources.")
                 _next_steps(("Decide pending resources.", _review_command("resources", session_path)))
                 return finish(3, "pending")
-            if not review_status["resources"]["publish"]:
+            inverse_ambiguities = [
+                item for item in session["queue"].get("inverse_ambiguities", [])
+                if any(session["choices"]["resources"].get(uri) != "exclude" for uri in item["uris"])
+            ]
+            if inverse_ambiguities:
+                print(f"Review incomplete: {len(inverse_ambiguities)} ambiguous inverse property assertion(s) require exclusion or source correction.")
+                _next_steps(("Exclude every property in each ambiguous inverse assertion, or correct the source RDF.", _review_command("resources", session_path)))
+                return finish(3, "assertions")
+            inverse_pending = [pair for pair in session["queue"].get("inverse_pairs", []) if pair["id"] not in session["choices"].get("inverse_pairs", {})]
+            if inverse_pending:
+                print(f"Review incomplete: {len(inverse_pending)} inverse property pair decisions pending. Run review inverses.")
+                _next_steps(("Choose the retained property for each inverse pair.", _review_command("inverses", session_path)))
+                return finish(3, "assertions")
+            retained_inverses = sum(decision.get("action") == "retain" for decision in session["choices"].get("inverse_pairs", {}).values())
+            if not review_status["resources"]["publish"] and not retained_inverses:
                 print("Review incomplete: no classes or properties selected for publication.")
                 _next_steps(("Select at least one class or property to publish.", _review_command("resources", session_path)))
                 return finish(3, "no_publication")
@@ -599,8 +685,13 @@ def _run_review(args: argparse.Namespace) -> int:
             review_status = status(session)
             if session.get("assertion_policy") == "strict" and _active_ignored_decisions(session):
                 raise ValueError("Strict policy conflicts with ignored assertions; review them before finalizing")
-            if review_status["resources"]["pending"] or not review_status["resources"]["publish"]:
+            retained_inverses = sum(decision.get("action") == "retain" for decision in session["choices"].get("inverse_pairs", {}).values())
+            if review_status["resources"]["pending"] or (not review_status["resources"]["publish"] and not retained_inverses):
                 raise ValueError("Review is incomplete; run review check for remaining decisions")
+            if any(any(session["choices"]["resources"].get(uri) != "exclude" for uri in item["uris"]) for item in session["queue"].get("inverse_ambiguities", [])):
+                raise ValueError("Ambiguous inverse property assertions require exclusion or source correction")
+            if any(pair["id"] not in session["choices"].get("inverse_pairs", {}) for pair in session["queue"].get("inverse_pairs", [])):
+                raise ValueError("Inverse property pair decisions are incomplete; run review inverses")
             inventory = _review_inventory(manifest_path, profiles)
             report = audit_inventory(inventory, profiles.capability, profiles.mapping, profiles.namespace_registry)
             if refresh_session(session, build_review_queue(inventory, report), manifest_sha256=_hash_json(profiles.manifest)):
@@ -696,6 +787,12 @@ def _review_resource(session: dict[str, object], uri: str) -> dict[str, object]:
 
 
 def _exclude_review_resource(session: dict[str, object], uri: str, reason: str) -> None:
+    for pair in session["queue"].get("inverse_pairs", []):
+        decision = session["choices"].get("inverse_pairs", {}).get(pair["id"])
+        if decision and decision.get("action") == "retain" and decision.get("retained_uri") == uri:
+            decision.update({"action": "exclude", "reason": reason})
+            session["journal"].append({"action": "exclude_inverse_pair", "pair_id": pair["id"], "reason": reason, "at": datetime.now(timezone.utc).isoformat()})
+            return
     record_choice(session, "resource", uri, "exclude")
     session["choices"].setdefault("resource_reasons", {})[uri] = reason
     session["journal"][-1]["reason"] = reason
@@ -703,9 +800,10 @@ def _exclude_review_resource(session: dict[str, object], uri: str, reason: str) 
 
 def _owl_review_groups(session: dict[str, object], inventory: object) -> list[tuple[tuple[str, tuple[str, ...]], list[str]]]:
     grouped: dict[tuple[str, tuple[str, ...]], set[str]] = {}
+    _, published, _ = review_resource_sets(session)
     properties = {item.id.value for item in inventory.resources if item.id.kind == "uri" and any(term.value in {f"{OWL}ObjectProperty", f"{OWL}DatatypeProperty", "http://www.w3.org/1999/02/22-rdf-syntax-ns#Property"} for term in item.types)}
     for (uri, field), source in anonymous_domain_ranges(inventory).items():
-        if uri not in properties or session["choices"]["resources"].get(uri) != "publish" or session["choices"].get("required", {}).get(uri, {}).get(field):
+        if uri not in properties or uri not in published or session["choices"].get("required", {}).get(uri, {}).get(field):
             continue
         grouped.setdefault((field, tuple(source["motifs"])), set()).add(uri)
     return [(key, sorted(uris)) for key, uris in sorted(grouped.items())]
@@ -758,7 +856,7 @@ def _review_inventory(manifest_path: Path, profiles: object) -> object:
 
 
 def _active_ignored_decisions(session: dict[str, object]) -> bool:
-    published = {uri for uri, choice in session["choices"]["resources"].items() if choice == "publish"}
+    _, published, _ = review_resource_sets(session)
     ignored = {finding_id for finding_id, choice in session["choices"].get("assertions", {}).items() if choice.get("action") == "ignore"}
     return any(item["id"] in ignored and (item.get("scope_resource") or item["resource"])["value"] in published for group in session["queue"]["resources"].values() for resource in group for item in resource["findings"])
 
@@ -790,7 +888,7 @@ def _print_review_blockers(blockers: list[dict[str, object]]) -> None:
 def _assertion_groups(session: dict[str, object], report: object, inventory: object, *, include_decided: bool = False) -> list[tuple[str, list[dict[str, object]]]]:
     from ontome_importer.review import RELATION_PREDICATES
 
-    published = {uri for uri, choice in session["choices"]["resources"].items() if choice == "publish"}
+    _, published, _ = review_resource_sets(session)
     decisions = session["choices"].get("assertions", {})
     triples = {triple.id: triple for triple in inventory.triples}
     groups: dict[str, list[dict[str, object]]] = {}
@@ -817,13 +915,26 @@ def _compile_review(session: dict[str, object], inventory: object, profiles: obj
     assert isinstance(choices, dict)
     resource_choices = choices["resources"]
     assert isinstance(resource_choices, dict)
+    inverse_choices = choices.get("inverse_pairs", {})
+    pair_by_id = {pair["id"]: pair for pair in session["queue"].get("inverse_pairs", [])}
+    retained_pairs = {
+        decision["retained_uri"]: (pair_by_id[pair_id], decision)
+        for pair_id, decision in inverse_choices.items()
+        if decision.get("action") == "retain" and pair_id in pair_by_id
+    }
+    excluded_pair_uris = {
+        uri
+        for pair_id, decision in inverse_choices.items()
+        if decision.get("action") == "exclude" and pair_id in pair_by_id
+        for uri in pair_by_id[pair_id]["uris"]
+    } | {decision["inverse_uri"] for _, decision in retained_pairs.values()}
     scope = profiles.mapping["scope"]
     rules = []
     for resource in inventory.resources:
-        if resource.id.kind != "uri" or resource_choices.get(resource.id.value) not in {"publish", "exclude"}:
+        if resource.id.kind != "uri" or (resource_choices.get(resource.id.value) not in {"publish", "exclude"} and resource.id.value not in retained_pairs and resource.id.value not in excluded_pair_uris):
             continue
         types = {term.value for term in resource.types}
-        action = resource_choices[resource.id.value]
+        action = "map" if resource.id.value in retained_pairs else "exclude" if resource.id.value in excluded_pair_uris else resource_choices[resource.id.value]
         rule: dict[str, object] = {"id": "review-" + hashlib.sha256(resource.id.value.encode()).hexdigest()[:12], "selector": {"uri": resource.id.value}, "action": action}
         if action == "exclude":
             rule["reason"] = choices.get("resource_reasons", {}).get(resource.id.value, "Excluded during terminal review.")
@@ -838,7 +949,11 @@ def _compile_review(session: dict[str, object], inventory: object, profiles: obj
             else:
                 target = {"entity_kind": "property", "property_kind": "rdf"}
             prefix = resource.id.value.rsplit("#", 1)[0] + "#" if "#" in resource.id.value else resource.id.value.rsplit("/", 1)[0] + "/"
-            target["identifier_in_namespace"] = {"source": "uri_suffix", "strip_prefix": prefix}
+            local_name = resource.id.value.removeprefix(prefix)
+            if re.fullmatch(r"[A-Za-z][A-Za-z0-9]*_[^/#]+", local_name):
+                target["identifier_in_namespace"] = {"source": "regex_capture", "pattern": re.escape(prefix) + r"([A-Za-z][A-Za-z0-9]*)_[^/#]+"}
+            else:
+                target["identifier_in_namespace"] = {"source": "uri_suffix", "strip_prefix": prefix}
             target["label_predicates"] = [f"{RDFS}label"]
             language = choices.get("required", {}).get(resource.id.value, {}).get("label_language")
             if language:
@@ -852,7 +967,9 @@ def _compile_review(session: dict[str, object], inventory: object, profiles: obj
             for decision in choices.get("field_mappings", {}).values():
                 if decision["uri"] != resource.id.value:
                     continue
-                if decision["field"] == "disjointWith":
+                if decision["field"] == "comment_sections":
+                    target["comment_sections"] = {"predicate": decision["predicate"], "format": "cidoc_crm_ea"}
+                elif decision["field"] == "disjointWith":
                     relation = {"field": "disjointWith", "predicate": decision["predicate"]}
                     if relation not in target["relations"]:
                         target["relations"].append(relation)
@@ -864,6 +981,17 @@ def _compile_review(session: dict[str, object], inventory: object, profiles: obj
         rules.append(rule)
     registry, catalog_terms = _review_catalogs(choices)
     configured_registry = profiles.namespace_registry
+    configured_ids = {item["ontome_namespace_id"] for item in configured_registry["namespaces"]}
+    for namespace in session["queue"].get("resolved_namespaces", []):
+        if namespace["ontome_namespace_id"] in configured_ids:
+            continue
+        registry["namespaces"].append({
+            "uri": namespace["uri"],
+            "version": namespace["version"],
+            "ontome_namespace_id": namespace["ontome_namespace_id"],
+            "status": "active",
+            "source": namespace["import_uri"],
+        })
     for namespace in configured_registry["namespaces"]:
         existing = next((item for item in registry["namespaces"] if item["ontome_namespace_id"] == namespace["ontome_namespace_id"]), None)
         if existing is not None and existing != namespace:
@@ -871,7 +999,7 @@ def _compile_review(session: dict[str, object], inventory: object, profiles: obj
         if existing is None:
             registry["namespaces"].append(namespace)
     external_references = {item["uri"]: item for item in profiles.mapping.get("external_references", [])}
-    published = {uri for uri, choice in resource_choices.items() if choice == "publish"}
+    published = {uri for uri, choice in resource_choices.items() if choice == "publish"} | set(retained_pairs)
     ignored_relation_triples = {decision["triple_ids"][0] for decision in choices.get("assertions", {}).values() if decision.get("action") == "ignore" and len(decision.get("triple_ids", [])) == 1}
     relation_predicates = {f"{RDFS}subClassOf", f"{RDFS}subPropertyOf", f"{RDFS}domain", f"{RDFS}range", f"{OWL}equivalentClass", f"{OWL}equivalentProperty", f"{OWL}inverseOf", f"{OWL}disjointWith"}
     for triple in inventory.triples:
@@ -896,20 +1024,36 @@ def _compile_review(session: dict[str, object], inventory: object, profiles: obj
                 if len(matches) == 1:
                     item, identifier = matches[0]
                     external_references[ref] = {"uri": ref, "reference_namespace": item["ontome_namespace_id"], "identifier": identifier}
-    mapping = {"format_version": "7.0", "scope": scope, "rules": rules, "external_references": list(external_references.values()), "external_reference_rules": profiles.mapping.get("external_reference_rules", []), "editorial_exceptions": [], "decisions": []}
+    external_reference_rules = list(profiles.mapping.get("external_reference_rules", []))
+    existing_prefixes = {item["uri_prefix"] for item in external_reference_rules}
+    for namespace in session["queue"].get("resolved_namespaces", []):
+        if namespace["uri"] in existing_prefixes:
+            continue
+        identifier = "imported-" + hashlib.sha256(namespace["uri"].encode()).hexdigest()[:12]
+        external_reference_rules.append({
+            "id": identifier,
+            "uri_prefix": namespace["uri"],
+            "reference_namespace": namespace["ontome_namespace_id"],
+            "identifier_extraction": {"source": "uri_local_identifier"},
+        })
+    mapping = {"format_version": "7.0", "scope": scope, "rules": rules, "external_references": list(external_references.values()), "external_reference_rules": external_reference_rules, "editorial_exceptions": [], "inverse_pairs": [], "decisions": []}
+    for retained_uri, (pair, decision) in retained_pairs.items():
+        decision_id = "review-inverse-" + hashlib.sha256(pair["id"].encode()).hexdigest()[:12]
+        mapping["inverse_pairs"].append({"id": pair["id"], "retained_uri": retained_uri, "inverse_uri": decision["inverse_uri"], "triple_ids": pair["triple_ids"], "decision_id": decision_id})
+        mapping["decisions"].append({"id": decision_id, "resource_uri": retained_uri, "construct": "inverse_of", "action": "transform", "status": "approved", "rationale": "Reviewer selected the retained property for an inverse pair.", "approved_by": decision["reviewer"], "approved_at": decision["at"][:10], "decision_reference": "review session inverse pair"})
     for uri, fields in choices.get("required", {}).items():
-        if resource_choices.get(uri) == "publish" and fields.get("label_language"):
+        if uri in published and fields.get("label_language"):
             mapping["decisions"].append({"id": "review-label-" + hashlib.sha256(uri.encode()).hexdigest()[:12], "resource_uri": uri, "construct": "missing_label_language", "action": "transform", "status": "approved", "rationale": fields["language_rationale"], "approved_by": fields["reviewer"], "approved_at": fields["at"][:10], "decision_reference": "review session label language"})
     for decision in choices.get("field_mappings", {}).values():
         uri = decision["uri"]
-        if resource_choices.get(uri) != "publish":
+        if uri not in published:
             continue
         key = f"{uri}|{decision['construct']}"
         if any(item["resource_uri"] == uri and item["construct"] == decision["construct"] for item in mapping["decisions"]):
             continue
         mapping["decisions"].append({"id": "review-field-" + hashlib.sha256(key.encode()).hexdigest()[:12], "resource_uri": uri, "construct": decision["construct"], "action": decision["action"], "status": "approved", "rationale": decision["reason"], "approved_by": decision["reviewer"], "approved_at": decision["at"][:10], "decision_reference": "review session assertion mapping"})
     for uri, fields in choices.get("required", {}).items():
-        if resource_choices.get(uri) != "publish":
+        if uri not in published:
             continue
         for field in ("hasDomain", "hasRange"):
             if field not in fields:

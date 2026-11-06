@@ -11,7 +11,7 @@ from pathlib import Path
 import yaml
 from jsonschema import Draft202012Validator, FormatChecker
 
-from ontome_importer.constructs import RELATION_FIELDS, SEMANTIC_CONSTRUCTS
+from ontome_importer.constructs import RELATION_FIELDS, RDFS, SEMANTIC_CONSTRUCTS
 from ontome_importer.external_references import ExternalReferenceError, validate_external_reference_configuration
 from ontome_importer.package_resources import package_resource_path
 
@@ -23,6 +23,8 @@ WRITER_CLASS_FIELDS = frozenset({
 WRITER_PROPERTY_FIELDS = frozenset({
     "identifierInNamespace", "identifierInURI", "label", "subPropertyOf",
     "equivalentProperty", "inverseOf", "hasDomain", "hasRange", "textProperties",
+    "domainInstancesMinQuantifier", "domainInstancesMaxQuantifier",
+    "rangeInstancesMinQuantifier", "rangeInstancesMaxQuantifier",
 })
 
 
@@ -116,6 +118,8 @@ def verify_source_checksum(manifest: dict[str, object], source_path: Path) -> No
 def target_identity(manifest: dict[str, object]) -> dict[str, object] | None:
     target = manifest["target"]
     identity = {"namespace_uri": target["namespace_uri"]}
+    if "import_namespace_uri" in target:
+        identity["import_namespace_uri"] = target["import_namespace_uri"]
     # Older workspaces recorded an ID that OntoME does not use for uploads.
     if "ontome_namespace_id" in target:
         identity["ontome_namespace_id"] = target["ontome_namespace_id"]
@@ -200,3 +204,9 @@ def validate_generation_mapping(mapping: dict[str, object], capability: dict[str
                 raise ProfileError(f"Mapping rule {rule['id']} uses an unsupported RDF predicate-to-XML relation mapping")
         if target.get("text_fields") and "textProperties" not in fields:
             raise ProfileError(f"Mapping rule {rule['id']} targets textProperties not allowed by the capability profile")
+        sections = target.get("comment_sections")
+        if sections:
+            if sections["format"] != "cidoc_crm_ea" or sections["predicate"] != f"{RDFS}comment":
+                raise ProfileError(f"Mapping rule {rule['id']} has an unsupported comment section format")
+            if "textProperties" not in fields or any(sections["predicate"] in field["predicates"] for field in target.get("text_fields", [])):
+                raise ProfileError(f"Mapping rule {rule['id']} maps the comment more than once or lacks textProperties")

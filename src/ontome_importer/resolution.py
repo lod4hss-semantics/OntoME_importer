@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+from html import escape
 import re
 
 from ontome_importer.audit import AuditReport, audit_inventory
+from ontome_importer.comment_sections import parse_cidoc_comment
 from ontome_importer.constructs import OWL, RDF, RDFS, SKOS
 from ontome_importer.external_references import ExternalReferenceError, resolve_external_reference
 from ontome_importer.inventory import Inventory, InventoryTriple, RdfTerm
@@ -20,6 +22,15 @@ class ResolvedText:
     triple_ids: tuple[str, ...]
     mapping_rule: str
     origin: str = "rdf"
+
+
+@dataclass(frozen=True)
+class ResolvedQuantifier:
+    value: str
+    resource: RdfTerm
+    triple_ids: tuple[str, ...]
+    mapping_rule: str
+    origin: str = "cidoc_ea_to_uml"
 
 
 @dataclass(frozen=True)
@@ -66,16 +77,18 @@ class ResolvedProperty:
     identifier_origin: str
     identifier_uri: str | None
     labels: tuple[ResolvedText, ...]
+    inverse_labels: tuple[ResolvedText | None, ...]
     relations: tuple[tuple[str, ResolvedReference], ...]
     domain: ResolvedReference | None
     range: ResolvedReference | None
     texts: tuple[tuple[str, ResolvedText], ...]
+    quantifiers: tuple[tuple[str, ResolvedQuantifier], ...] = ()
 
 
 @dataclass(frozen=True)
 class ResolvedNamespace:
     labels: tuple[ResolvedText, ...]
-    namespace_uri: str
+    namespace_uri: str | None
     version: str | None
     published_at: str | None
     contributors: str | None
@@ -147,7 +160,11 @@ def resolve_generation(
     resolved_classes: list[ResolvedClass] = []
     resolved_properties: list[ResolvedProperty] = []
     used_namespaces: set[int] = set()
+    inverse_pairs = {item["retained_uri"]: item for item in mapping.get("inverse_pairs", [])}
+    suppressed_inverse_properties = {str(item["inverse_uri"]) for item in inverse_pairs.values()}
     for resource, rule, target in bases:
+        if resource.value in suppressed_inverse_properties:
+            continue
         if resource not in identifiers or collisions[identifiers[resource].value] > 1:
             continue
         source_triples = triples_by_subject.get(resource, [])
@@ -155,10 +172,25 @@ def resolve_generation(
         labels = _texts(source_triples, target["label_predicates"], resource, rule["id"], findings, "label", target.get("default_label_language"))
         if not labels:
             findings.append(_issue("blocked", resource, (), rule["id"], "At least one localized label is required.", "incomplete_source_data"))
-        texts, configured_predicates = _configured_texts(source_triples, target, resource, rule["id"], findings)
+        texts, configured_predicates, quantifiers = _configured_texts(source_triples, target, resource, rule["id"], findings)
+        inverse_pair = inverse_pairs.get(resource.value)
+        relation_target = target
+        if inverse_pair:
+            relation_target = {**target, "relations": [relation for relation in target.get("relations", []) if relation["field"] != "inverseOf"]}
         relations, relation_predicates = _relations(
-            source_triples, target, resource, rule["id"], identifiers, mapping, registry, findings, used_namespaces
+            source_triples, relation_target, resource, rule["id"], identifiers, mapping, registry, findings, used_namespaces
         )
+        inverse_labels: tuple[ResolvedText | None, ...] = ()
+        if inverse_pair:
+            other = RdfTerm("uri", str(inverse_pair["inverse_uri"]))
+            other_rule = next((candidate_rule for candidate_resource, candidate_rule, _ in bases if candidate_resource == other), None)
+            other_target = other_rule["target"] if other_rule else target
+            other_labels = _texts(
+                triples_by_subject.get(other, []), other_target["label_predicates"], other,
+                str(inverse_pair["decision_id"]), findings, "inverse label", other_target.get("default_label_language"),
+            )
+            inverse_labels = _inverse_labels(labels, other_labels)
+            relation_predicates.add(f"{OWL}inverseOf")
         handled = {f"{RDF}type", *target["label_predicates"], *configured_predicates, *relation_predicates}
         if target["identifier_in_namespace"]["source"] == "literal_predicate":
             handled.add(target["identifier_in_namespace"]["predicate"])
@@ -173,19 +205,26 @@ def resolve_generation(
         if target["entity_kind"] == "class":
             resolved_classes.append(ResolvedClass(resource, _type_triple_ids(source_triples), rule["id"], identifiers[resource].value, identifiers[resource].triple_ids, identifiers[resource].origin, _identifier_uri(target, resource), labels, relations, texts))
         else:
-            resolved_properties.append(ResolvedProperty(resource, _type_triple_ids(source_triples), rule["id"], target["property_kind"], identifiers[resource].value, identifiers[resource].triple_ids, identifiers[resource].origin, _identifier_uri(target, resource), labels, relations, domain, range_, texts))
+            resolved_properties.append(ResolvedProperty(resource, _type_triple_ids(source_triples), rule["id"], target["property_kind"], identifiers[resource].value, identifiers[resource].triple_ids, identifiers[resource].origin, _identifier_uri(target, resource), labels, inverse_labels, relations, domain, range_, texts, quantifiers))
 
     if any(finding["status"] in {"blocked", "invalid"} for finding in findings):
         return ResolutionResult(None, _audit_document(inventory, capability, findings, manifest))
     target = manifest["target"]
     namespace = ResolvedNamespace(
-        tuple(ResolvedText(item["value"], item["lang"], RdfTerm("uri", str(target["namespace_uri"])), (), "manifest", "configuration") for item in target["labels"]),
-        str(target["namespace_uri"]), target.get("version"), target.get("published_at"), target.get("contributors"),
+        tuple(ResolvedText(_namespace_version_label(item["value"], target.get("version")), item["lang"], RdfTerm("uri", str(target["namespace_uri"])), (), "manifest", "configuration") for item in target["labels"]),
+        target.get("import_namespace_uri"), target.get("version"), target.get("published_at"), target.get("contributors"),
         tuple(ResolvedText(item["value"], item["lang"], RdfTerm("uri", str(target["namespace_uri"])), (), "manifest", "configuration") for item in target.get("descriptions", [])),
         tuple(sorted(used_namespaces)),
     )
     generation = ResolvedGeneration(namespace, tuple(sorted(resolved_classes, key=lambda item: item.identifier)), tuple(sorted(resolved_properties, key=lambda item: item.identifier)))
     return ResolutionResult(generation, _audit_document(inventory, capability, findings, manifest))
+
+
+def _namespace_version_label(label: str, version: str | None) -> str:
+    """Name the imported version without changing the base label in the manifest."""
+    if not version or re.search(rf"(?<![\w.]){re.escape(version)}(?![\w.])", label):
+        return label
+    return f"{label.rstrip()} version {version}"
 
 
 def _local_identifier(resource: RdfTerm, target: dict[str, object], triples: list[InventoryTriple], rule: str, findings: list[dict[str, object]]) -> ResolvedIdentifier | None:
@@ -245,15 +284,50 @@ def _texts(triples: list[InventoryTriple], predicates: list[str], resource: RdfT
     return tuple(sorted(values, key=lambda item: (item.language, item.value, item.triple_ids)))
 
 
-def _configured_texts(triples: list[InventoryTriple], target: dict[str, object], resource: RdfTerm, rule: str, findings: list[dict[str, object]]) -> tuple[tuple[tuple[str, ResolvedText], ...], set[str]]:
+def _inverse_labels(labels: tuple[ResolvedText, ...], inverse_labels: tuple[ResolvedText, ...]) -> tuple[ResolvedText | None, ...]:
+    by_language: dict[str, list[ResolvedText]] = {}
+    for label in inverse_labels:
+        by_language.setdefault(label.language, []).append(label)
+    result = []
+    for label in labels:
+        matches = by_language.get(label.language, [])
+        result.append(matches[0] if len(matches) == 1 else None)
+    return tuple(result)
+
+
+def _configured_texts(triples: list[InventoryTriple], target: dict[str, object], resource: RdfTerm, rule: str, findings: list[dict[str, object]]) -> tuple[tuple[tuple[str, ResolvedText], ...], set[str], tuple[tuple[str, ResolvedQuantifier], ...]]:
     values: list[tuple[str, ResolvedText]] = []
     predicates: set[str] = set()
+    quantifiers: list[tuple[str, ResolvedQuantifier]] = []
     for field in target.get("text_fields", []):
         predicates.update(field["predicates"])
         for text in _texts(triples, field["predicates"], resource, rule, findings, field["field"]):
             values.append((field["field"], text))
+    sections = target.get("comment_sections")
+    if sections:
+        predicate = sections["predicate"]
+        predicates.add(predicate)
+        for triple in triples:
+            if triple.predicate.value != predicate:
+                continue
+            if triple.object.kind != "literal" or not triple.object.language:
+                findings.append(_issue("blocked", resource, (triple.id,), rule, "CIDOC CRM comment requires a language-tagged literal.", "invalid_source_data"))
+                continue
+            try:
+                parsed = parse_cidoc_comment(triple.object.value, property=target["entity_kind"] == "property")
+            except ValueError as error:
+                findings.append(_issue("blocked", resource, (triple.id,), rule, str(error), "invalid_source_data"))
+                continue
+            extracted = [("scopeNote", parsed.scope_note)]
+            if parsed.examples:
+                extracted.append(("example", "<ul>" + "".join(f"<li>{escape(example, quote=False)}</li>" for example in parsed.examples) + "</ul>"))
+            for field, value in extracted:
+                values.append((field, ResolvedText(value, triple.object.language, resource, (triple.id,), rule, "cidoc_comment_section")))
+            quantifiers.extend((field, ResolvedQuantifier(value, resource, (triple.id,), rule)) for field, value in parsed.quantifiers)
     order = {"scopeNote": 0, "example": 1, "contextNote": 2, "bibliographicalNote": 3}
-    return tuple(sorted(values, key=lambda item: (order[item[0]], item[1].language, item[1].value, item[1].triple_ids))), predicates
+    if len({field for field, _ in quantifiers}) != len(quantifiers):
+        findings.append(_issue("blocked", resource, tuple(sorted({triple_id for _, item in quantifiers for triple_id in item.triple_ids})), rule, "Conflicting CIDOC CRM quantifications.", "ambiguous_source_data"))
+    return tuple(sorted(values, key=lambda item: (order[item[0]], item[1].language, item[1].value, item[1].triple_ids))), predicates, tuple(quantifiers)
 
 
 def _relations(triples: list[InventoryTriple], target: dict[str, object], resource: RdfTerm, rule: str, identifiers: dict[RdfTerm, str], mapping: dict[str, object], registry: dict[str, object], findings: list[dict[str, object]], used_namespaces: set[int]) -> tuple[tuple[tuple[str, ResolvedReference], ...], set[str]]:

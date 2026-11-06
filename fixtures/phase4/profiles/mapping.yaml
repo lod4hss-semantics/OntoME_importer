@@ -14,6 +14,7 @@ external_references:
     identifier: D1
 external_reference_rules: []
 editorial_exceptions: []
+inverse_pairs: []
 decisions: []
 rules:
   - id: map-class

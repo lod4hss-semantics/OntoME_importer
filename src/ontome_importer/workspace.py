@@ -7,6 +7,7 @@ from importlib import resources
 import json
 from pathlib import Path
 import os
+import re
 import shutil
 import tempfile
 from urllib.parse import urlparse
@@ -29,6 +30,7 @@ def initialize_workspace(
     source_format: str | None,
     scope_prefixes: list[str],
     target_namespace_uri: str | None,
+    import_namespace_uri: str | None,
     target_label: str | None,
     target_label_lang: str | None,
     target_version: str | None,
@@ -37,6 +39,8 @@ def initialize_workspace(
         raise WorkspaceError(f"Source RDF file does not exist: {source}")
     if workspace.exists():
         raise WorkspaceError(f"Workspace already exists: {workspace}")
+    if import_namespace_uri is not None and not _is_uri(import_namespace_uri):
+        raise WorkspaceError("--import-namespace-uri must be an absolute URI")
     format_name = _resolve_format(source, source_format)
     workspace.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=".ontome-importer-init-", dir=workspace.parent))
@@ -59,12 +63,19 @@ def initialize_workspace(
         target_label_lang = target_label_lang or "en"
         if not target_label.strip():
             raise WorkspaceError("--target-label must not be empty")
-        versions = {triple.object.value for triple in inventory.triples if triple.subject.value == (source_uri or namespace_uri) and triple.predicate.value == "http://www.w3.org/2002/07/owl#versionInfo" and triple.object.kind == "literal" and triple.object.value.strip()}
-        if not versions:
-            versions = {triple.object.value for triple in inventory.triples if triple.subject.value == (source_uri or namespace_uri) and triple.predicate.value == "http://www.w3.org/2002/07/owl#versionIRI" and triple.object.kind == "uri"}
-        if target_version is None and len(versions) > 1:
-            raise WorkspaceError("Source has ambiguous ontology version metadata; provide --target-version")
-        target_version = target_version or next(iter(versions), None)
+        metadata_uri = source_uri or namespace_uri
+        version_iris = {triple.object.value for triple in inventory.triples if triple.subject.value == metadata_uri and triple.predicate.value == "http://www.w3.org/2002/07/owl#versionIRI" and triple.object.kind == "uri"}
+        if target_version is None:
+            if len(version_iris) > 1:
+                raise WorkspaceError("Source has ambiguous owl:versionIRI values; provide --target-version")
+            if version_iris:
+                version_iri = next(iter(version_iris))
+                version_token = urlparse(version_iri).path.rstrip("/").rsplit("/", 1)[-1]
+                match = re.fullmatch(r"v?(\d+(?:\.\d+)*)", version_token)
+                if match is None:
+                    raise WorkspaceError("Cannot extract a version number from owl:versionIRI; provide --target-version")
+                target_version = match.group(1)
+        descriptions = sorted({(triple.object.language or target_label_lang, triple.object.value) for triple in inventory.triples if triple.subject.value == metadata_uri and triple.predicate.value == "http://www.w3.org/2002/07/owl#versionInfo" and triple.object.kind == "literal" and triple.object.value.strip()})
         if not scope_prefixes:
             scope_prefixes = [namespace_uri]
         if not all(_is_uri(value) for value in scope_prefixes):
@@ -78,7 +89,7 @@ def initialize_workspace(
         (profiles / "mapping-generation.yaml").write_text(_generation_mapping(scope_prefixes), encoding="utf-8")
         config = staging / "config"
         (config / "audit.yaml").write_text(_audit_manifest(source_name, format_name, checksum, namespace_uri), encoding="utf-8")
-        (config / "generation.yaml").write_text(_generation_manifest(source_name, format_name, checksum, namespace_uri, target_label, target_label_lang, target_version), encoding="utf-8")
+        (config / "generation.yaml").write_text(_generation_manifest(source_name, format_name, checksum, namespace_uri, target_label, target_label_lang, target_version, descriptions, import_namespace_uri), encoding="utf-8")
         (staging / "build").mkdir()
         (staging / "README.md").write_text(_workspace_readme(source_name, namespace_uri), encoding="utf-8")
 
@@ -128,8 +139,10 @@ strict: true
 '''
 
 
-def _generation_manifest(source_name: str, source_format: str, checksum: str, namespace_uri: str, target_label: str, target_label_lang: str, target_version: str | None) -> str:
+def _generation_manifest(source_name: str, source_format: str, checksum: str, namespace_uri: str, target_label: str, target_label_lang: str, target_version: str | None, descriptions: list[tuple[str, str]], import_namespace_uri: str | None) -> str:
     version_line = f"  version: {_yaml_string(target_version)}\n" if target_version else ""
+    descriptions_lines = "  descriptions:\n" + "".join(f"    - lang: {_yaml_string(lang)}\n      value: {_yaml_string(value)}\n" for lang, value in descriptions) if descriptions else ""
+    import_uri_line = f"  import_namespace_uri: {_yaml_string(import_namespace_uri)}\n" if import_namespace_uri else ""
     return f'''# Created by ontome-importer init.
 format_version: "1.2"
 source:
@@ -141,7 +154,7 @@ target:
   labels:
     - lang: {_yaml_string(target_label_lang)}
       value: {_yaml_string(target_label)}
-{version_line}profiles:
+{version_line}{descriptions_lines}{import_uri_line}profiles:
   capability: profiles/capability-generation.yaml
   namespace_registry: profiles/namespace-registry.yaml
   mapping: profiles/mapping-generation.yaml
@@ -168,6 +181,7 @@ scope:
 {selectors}external_references: []
 external_reference_rules: []
 editorial_exceptions: []
+inverse_pairs: []
 decisions: []
 rules: []
 '''
@@ -179,7 +193,7 @@ def _workspace_readme(source_name: str, namespace_uri: str) -> str:
 Votre source RDF copiée est `source/{source_name}`.
 URI du namespace importé : `{namespace_uri}`.
 
-Chargez le XML généré depuis l'interface du projet OntoME. Ce projet doit déjà posséder un namespace racine ; l'ID de projet ne fait pas partie du XML.
+Chargez le XML généré depuis l'interface du projet OntoME. Ce projet doit déjà posséder un namespace racine dont l'URI est réutilisée par défaut ; l'ID de projet ne fait pas partie du XML.
 
 ## Prochaine étape : audit
 

@@ -23,6 +23,16 @@ def test_external_reference_rule_extracts_a_configured_regex_capture():
     assert (resolved.identifier, resolved.origin, resolved.rule_id) == ("A12", "external_rule", "external")
 
 
+@pytest.mark.parametrize(("uri", "identifier"), [
+    ("https://example.org/external/E11_Modification", "E11"),
+    ("https://example.org/external/Term", "Term"),
+    ("https://example.org/external/term#P16_used_specific_object", "P16"),
+])
+def test_external_reference_rule_extracts_a_generic_uri_local_identifier(uri, identifier):
+    mapping = _mapping([{"id": "external", "uri_prefix": "https://example.org/external/", "reference_namespace": 123, "identifier_extraction": {"source": "uri_local_identifier"}}])
+    assert resolve_external_reference(uri, mapping, REGISTRY).identifier == identifier
+
+
 def test_external_reference_rule_requires_one_capture_group_and_a_matching_uri():
     invalid = _mapping([{"id": "external", "uri_prefix": "https://example.org/external/", "reference_namespace": 123, "identifier_extraction": {"source": "regex_capture", "pattern": r"https://example\.org/external/.*"}}])
     with pytest.raises(ExternalReferenceError, match="exactly one"):

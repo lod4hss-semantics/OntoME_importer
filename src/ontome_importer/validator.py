@@ -84,7 +84,8 @@ def validate_generation(manifest_path: Path, xml_path: Path, trace_path: Path, a
 
     if xml_document is not None:
         if target is not None:
-            check("xml_target_uri_matches_manifest", xml_document.xpath("/namespace/namespaceURI/text()") == [target["namespace_uri"]], "XML namespaceURI differs from the declared OntoME target.")
+            expected_import_uri = [target["import_namespace_uri"]] if "import_namespace_uri" in target else []
+            check("xml_target_uri_matches_manifest", xml_document.xpath("/namespace/namespaceURI/text()") == expected_import_uri, "XML namespaceURI differs from the optional OntoME import namespace URI.")
         _check_xml_structure(xml_document, duplicates, unresolved, check)
     if xml_document is not None and isinstance(trace, dict) and trace_valid:
         _check_trace(trace, xml_document, inventory, profiles.mapping, unresolved, untraced, check)
@@ -210,9 +211,7 @@ def _check_trace(trace: dict[str, object], document: etree._Element, inventory: 
         if valid_node:
             node = matches[0]
             traced_nodes.add(node)
-            attributes = dict(sorted(node.attrib.items()))
-            if node.tag == "standardLabel" and node.getparent() is not None and node.getparent().tag == "label":
-                attributes = dict(sorted(node.getparent().attrib.items()))
+            attributes = _trace_attributes(node)
             matches_value = (node.tag == entry["element"] and (node.text or "") == entry["value"] and attributes == entry["attributes"])
             check(f"trace_value:{entry['id']}", matches_value, "Trace element, value, or attributes differ from XML.", entry["xml_path"])
         sources_valid = all(identifier in triple_ids for identifier in entry["source_triples"])
@@ -252,6 +251,13 @@ def _resource_in_inventory(resource: dict[str, object], resources: set[object]) 
         return RdfTerm(resource["kind"], resource["value"], resource.get("language"), resource.get("datatype")) in resources
     except (KeyError, TypeError, ValueError):
         return False
+
+
+def _trace_attributes(node: etree._Element) -> dict[str, str]:
+    parent = node.getparent()
+    if parent is not None and parent.tag == "label":
+        return dict(sorted(parent.attrib.items()))
+    return dict(sorted(node.attrib.items()))
 
 
 def _xml_path(document: etree._Element, element: etree._Element) -> str:

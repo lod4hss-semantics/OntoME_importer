@@ -7,6 +7,7 @@ from collections import Counter
 from dataclasses import dataclass
 
 from ontome_importer.constructs import ConstructOccurrence, RELATION_FIELDS, RDF, RDFS, OWL, SKOS, XSD, anonymous_domain_ranges, detect_constructs
+from ontome_importer.comment_sections import parse_cidoc_comment
 from ontome_importer.external_references import ExternalReferenceError, resolve_external_reference
 from ontome_importer.inventory import Inventory, RdfTerm
 
@@ -252,6 +253,16 @@ def _generation_mapping_covers(
     if construct == "label":
         return predicate in target.get("label_predicates", [])
     if construct in {"comment", "scope_note", "example"}:
+        sections = target.get("comment_sections")
+        if construct == "comment" and sections and predicate == sections["predicate"]:
+            triple = triples[occurrence.triple_ids[0]]
+            if triple.object.kind != "literal" or not triple.object.language:
+                return False
+            try:
+                parse_cidoc_comment(triple.object.value, property=target["entity_kind"] == "property")
+            except ValueError:
+                return False
+            return True
         return any(predicate in field.get("predicates", []) for field in target.get("text_fields", []))
     if construct == "unknown_predicate":
         identifier = target.get("identifier_in_namespace", {})

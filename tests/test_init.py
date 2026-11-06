@@ -2,6 +2,7 @@ import hashlib
 from pathlib import Path
 import json
 import yaml
+from lxml import etree
 
 from ontome_importer.cli import main
 from ontome_importer.profiles import load_audit_profiles, load_generation_profiles, target_identity, verify_capability_xsd
@@ -36,6 +37,57 @@ def test_init_creates_a_valid_auditable_workspace(tmp_path, capsys):
     verify_capability_xsd(generation.capability)
     assert main(["audit", "--manifest", str(workspace / "config/audit.yaml"), "--output-dir", str(workspace / "build/audit")]) == 0
     assert {path.name for path in (workspace / "build/audit").iterdir()} == {"inventory.json", "audit.json", "audit.md", "review-queue.json"}
+
+
+def test_ontology_version_iri_and_version_info_fill_distinct_namespace_fields(tmp_path):
+    source = tmp_path / "versioned.ttl"
+    source.write_text('''@prefix ex: <https://example.org/versioned/> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+ex: a owl:Ontology ; rdfs:label "Versioned"@en ;
+  owl:versionIRI <https://example.org/versioned/3.2/> ;
+  owl:versionInfo "Versioned ontology 3.2 with references to related models."@en .
+ex:Class a owl:Class ; rdfs:label "Class"@en .
+''', encoding="utf-8")
+    workspace = tmp_path / "workspace"
+    manifest = workspace / "config/generation.yaml"
+    session = workspace / "decisions/review.json"
+    assert main(["init", "--source", str(source), "--workspace", str(workspace)]) == 0
+    target = load_generation_profiles(manifest).manifest["target"]
+    assert target["version"] == "3.2"
+    assert target["descriptions"] == [{"lang": "en", "value": "Versioned ontology 3.2 with references to related models."}]
+    assert main(["review", "start", "--manifest", str(manifest), "--session", str(session)]) == 0
+    assert main(["review", "resources", "--session", str(session), "--action", "publish"]) == 0
+    assert main(["review", "check", "--session", str(session)]) == 0
+    assert main(["review", "finalize", "--manifest", str(manifest), "--session", str(session)]) == 0
+    output = workspace / "build/import"
+    assert main(["generate", "--manifest", str(manifest), "--output-dir", str(output)]) == 0
+    document = etree.parse(str(output / "import.xml"))
+    assert document.xpath("/namespace/standardLabel/text()") == ["Versioned version 3.2"]
+    assert document.xpath("/namespace/version/text()") == ["3.2"]
+    assert document.xpath("/namespace/description/text()") == ["Versioned ontology 3.2 with references to related models."]
+    assert document.xpath("/namespace/description/@lang") == ["en"]
+    assert document.xpath("/namespace/namespaceURI") == []
+    assert main(["validate", "--manifest", str(manifest), "--xml", str(output / "import.xml"), "--trace", str(output / "generation-trace.json"), "--audit", str(output / "generation-audit.json"), "--output", str(output / "validation.json")]) == 0
+
+
+def test_explicit_import_namespace_uri_is_written_and_validated(tmp_path):
+    workspace = tmp_path / "other-root"
+    import_uri = "https://example.org/ontome-root/"
+    assert main(["init", "--source", str(E2E_SOURCE), "--workspace", str(workspace), "--import-namespace-uri", import_uri]) == 0
+    manifest = workspace / "config/generation.yaml"
+    target = load_generation_profiles(manifest).manifest["target"]
+    assert target["namespace_uri"] == "https://example.org/e2e/"
+    assert target["import_namespace_uri"] == import_uri
+    session = workspace / "decisions/review.json"
+    assert main(["review", "start", "--manifest", str(manifest), "--session", str(session)]) == 0
+    assert main(["review", "resources", "--session", str(session), "--action", "publish"]) == 0
+    assert main(["review", "check", "--session", str(session)]) == 0
+    assert main(["review", "finalize", "--manifest", str(manifest), "--session", str(session)]) == 0
+    output = workspace / "build/import"
+    assert main(["generate", "--manifest", str(manifest), "--output-dir", str(output)]) == 0
+    assert etree.parse(str(output / "import.xml")).xpath("/namespace/namespaceURI/text()") == [import_uri]
+    assert main(["validate", "--manifest", str(manifest), "--xml", str(output / "import.xml"), "--trace", str(output / "generation-trace.json"), "--audit", str(output / "generation-audit.json"), "--output", str(output / "validation.json")]) == 0
 
 
 def test_init_renders_multiple_scope_prefixes_and_refuses_existing_workspace(tmp_path, capsys):

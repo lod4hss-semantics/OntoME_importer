@@ -56,11 +56,18 @@ def write_xml(generation: ResolvedGeneration, capability: dict[str, object], xsd
                 standard = etree.SubElement(label, "standardLabel")
                 standard.text = text.value
                 _entry(entries, f"{base}/label[{label_index}]/standardLabel[1]", "standardLabel", text.value, {"lang": text.language}, text.resource, text.triple_ids, text.mapping_rule, text.origin)
-            _relations(element, item.relations, ("subPropertyOf", "equivalentProperty", "inverseOf"), base, entries)
+                inverse = item.inverse_labels[label_index - 1] if label_index <= len(item.inverse_labels) else None
+                if inverse is not None:
+                    inverse_element = etree.SubElement(label, "inverseLabel")
+                    inverse_element.text = inverse.value
+                    _entry(entries, f"{base}/label[{label_index}]/inverseLabel[1]", "inverseLabel", inverse.value, {"lang": text.language}, inverse.resource, inverse.triple_ids, inverse.mapping_rule, "inverse_property_label")
+            _relations(element, item.relations, ("subPropertyOf", "equivalentProperty"), base, entries)
             if item.domain is None or item.range is None:
                 raise XmlGenerationError("Resolved property has no domain or range.")
             _reference_element(element, "hasDomain", item.domain, f"{base}/hasDomain", entries)
             _reference_element(element, "hasRange", item.range, f"{base}/hasRange", entries)
+            for field, quantifier in item.quantifiers:
+                _rdf_value(element, field, quantifier.value, quantifier.resource, quantifier.triple_ids, quantifier.mapping_rule, quantifier.origin, f"{base}/{field}", entries)
             _texts(element, item.texts, base, entries)
     xml = etree.tostring(root, encoding="UTF-8", xml_declaration=True, pretty_print=True)
     schema = etree.XMLSchema(etree.parse(str(xsd_path)))

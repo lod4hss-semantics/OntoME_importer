@@ -6,7 +6,7 @@ xsd:
 xml:
   root: namespace
   class_fields: [identifierInNamespace, identifierInURI, standardLabel, subClassOf, equivalentClass, disjointWith, textProperties]
-  property_fields: [identifierInNamespace, identifierInURI, label, subPropertyOf, equivalentProperty, inverseOf, hasDomain, hasRange, textProperties]
+  property_fields: [identifierInNamespace, identifierInURI, label, subPropertyOf, equivalentProperty, inverseOf, hasDomain, hasRange, domainInstancesMinQuantifier, domainInstancesMaxQuantifier, rangeInstancesMinQuantifier, rangeInstancesMaxQuantifier, textProperties]
 constructs:
   rdfs_class: supported
   owl_class: supported

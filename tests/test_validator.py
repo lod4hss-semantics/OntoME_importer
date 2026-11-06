@@ -3,10 +3,11 @@ from pathlib import Path
 import shutil
 
 from jsonschema import Draft202012Validator
+from lxml import etree
 import yaml
 
 from ontome_importer.cli import main
-from ontome_importer.validator import validate_generation
+from ontome_importer.validator import _trace_attributes, validate_generation
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,6 +31,11 @@ def test_validate_accepts_a_complete_generation_bundle(tmp_path):
     assert report["valid"] is True
     assert report["counts"]["failed"] == 0
     assert list(Draft202012Validator(schema).iter_errors(report)) == []
+
+
+def test_trace_attributes_inherit_the_language_of_an_inverse_label():
+    node = etree.fromstring(b'<label lang="en"><inverseLabel>inverse</inverseLabel></label>')[0]
+    assert _trace_attributes(node) == {"lang": "en"}
 
 
 def test_validate_accepts_a_bundle_with_generic_external_reference_rules(tmp_path):

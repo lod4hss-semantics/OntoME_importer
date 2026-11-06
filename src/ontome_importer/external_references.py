@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import re
+from urllib.parse import urlsplit
 
 
 class ExternalReferenceError(ValueError):
@@ -65,6 +66,10 @@ def resolve_external_reference(uri: str, mapping: dict[str, object], registry: d
     extraction = rule["identifier_extraction"]
     if extraction["source"] == "uri_suffix":
         identifier = uri.removeprefix(rule["uri_prefix"])
+    elif extraction["source"] == "uri_local_identifier":
+        parsed = urlsplit(uri)
+        local_name = parsed.fragment or parsed.path.rstrip("/").rsplit("/", 1)[-1]
+        identifier = local_name.split("_", 1)[0]
     else:
         match = re.fullmatch(extraction["pattern"], uri)
         identifier = match.group(1) if match else ""

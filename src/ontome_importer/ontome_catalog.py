@@ -63,6 +63,23 @@ def resolve_namespace_binding(uri: str, version: str | None, path: Path | None =
     return matches[0]
 
 
+def resolve_imported_namespaces(import_uris: set[str], path: Path | None = None) -> tuple[tuple[NamespaceBinding, str], ...]:
+    """Resolve imports from their declared namespace URI and final version segment."""
+    by_import: dict[str, list[NamespaceBinding]] = {}
+    for import_uri in import_uris:
+        import_path = urlsplit(import_uri).path.rstrip("/")
+        for binding in load_namespace_bindings(path):
+            if binding.version is None or not import_uri.startswith(binding.uri):
+                continue
+            if import_path.rsplit("/", 1)[-1] == binding.version:
+                by_import.setdefault(import_uri, []).append(binding)
+    return tuple(
+        (bindings[0], import_uri)
+        for import_uri, bindings in sorted(by_import.items())
+        if len(bindings) == 1
+    )
+
+
 def fetch_namespace_catalog(binding: NamespaceBinding, destination: Path, timeout: float = 30.0, base_url: str = "https://ontome.net") -> dict[str, object]:
     """Fetch, parse, and atomically cache the RDF export for a selected namespace."""
     url = f"{base_url.rstrip('/')}/api/namespaces-rdf-owl.rdf?namespace={binding.ontome_namespace_id}&lang=en"

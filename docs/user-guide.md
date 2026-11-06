@@ -142,7 +142,7 @@ ontome-importer init \
 
 `--workspace` est le nouveau dossier que l'outil doit créer. Il doit ne pas encore exister. L'outil refuse d'écraser un import existant.
 
-L'URI RDF, le libellé et sa langue proviennent de la déclaration `owl:Ontology` dans la source lorsque celle-ci est non ambiguë. Si l'URI manque ou est ambiguë, précisez `--target-namespace-uri`. Si cette URI n'a pas de libellé, l'outil reprend le seul libellé d'ontologie disponible dans la source ; s'il manque ou est ambigu, précisez `--target-label` et `--target-label-lang`. `owl:versionInfo` (ou à défaut `owl:versionIRI`) fournit la version si elle est unique ; `--target-version` permet de la préciser.
+L'URI RDF, le libellé et sa langue proviennent de la déclaration `owl:Ontology` dans la source lorsque celle-ci est non ambiguë. Si l'URI manque ou est ambiguë, précisez `--target-namespace-uri`. Si cette URI n'a pas de libellé, l'outil reprend le seul libellé d'ontologie disponible dans la source ; s'il manque ou est ambigu, précisez `--target-label` et `--target-label-lang`. Le numéro final de `owl:versionIRI` fournit la version ; `owl:versionInfo` alimente la description du namespace. `--target-version` permet de préciser le numéro si nécessaire. L'URI RDF sert à identifier la source et à sélectionner les ressources, mais n'est pas ajoutée au XML par défaut : OntoME utilise l'URI du namespace racine du projet actif. Pour fournir explicitement une autre URI dans le XML, utilisez `--import-namespace-uri` lors de `init`.
 
 Par défaut, `--scope-uri-prefix` reprend l'URI RDF cible. **L'URI de l'ontologie et le préfixe de ses termes peuvent être différents** : dans ce cas, indiquez les deux séparément. Si plusieurs préfixes doivent être importés, répétez l'option :
 

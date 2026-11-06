@@ -14,6 +14,7 @@ from typing import Literal
 from ontome_importer.audit import AuditReport
 from ontome_importer.constructs import OWL, RDF, RDFS, SKOS
 from ontome_importer.inventory import Inventory, RdfTerm
+from ontome_importer.ontome_catalog import resolve_imported_namespaces
 
 
 RESOURCE_CHOICES = frozenset({"publish", "exclude", "pending"})
@@ -35,8 +36,19 @@ def build_review_queue(inventory: Inventory, report: AuditReport) -> dict[str, o
 
     scoped_uris = _scoped_uris(report)
     imports = _imports(inventory)
+    resolved_namespaces = [
+        {
+            "uri": binding.uri,
+            "version": binding.version,
+            "ontome_namespace_id": binding.ontome_namespace_id,
+            "import_uri": import_uri,
+        }
+        for binding, import_uri in resolve_imported_namespaces({item["uri"] for item in imports})
+    ]
     imported_uris = {item["uri"] for item in imports}
     resources = {resource.id.value: resource for resource in inventory.resources if resource.id.kind == "uri"}
+    inverse_pairs, inverse_ambiguities = _inverse_pairs(inventory, scoped_uris, resources)
+    paired_properties = {uri for pair in inverse_pairs for uri in pair["uris"]}
     classes: list[dict[str, object]] = []
     properties: list[dict[str, object]] = []
     for uri in sorted(scoped_uris):
@@ -52,7 +64,7 @@ def build_review_queue(inventory: Inventory, report: AuditReport) -> dict[str, o
         type_uris = {term.value for term in resource.types}
         if type_uris & CLASS_TYPES:
             classes.append(item)
-        if type_uris & PROPERTY_TYPES:
+        if type_uris & PROPERTY_TYPES and uri not in paired_properties:
             properties.append(item)
 
     external: dict[str, set[str]] = {}
@@ -74,11 +86,14 @@ def build_review_queue(inventory: Inventory, report: AuditReport) -> dict[str, o
         "format_version": "1.0",
         "source_sha256": inventory.source_sha256,
         "resources": {"classes": classes, "properties": properties},
+        "inverse_pairs": inverse_pairs,
+        "inverse_ambiguities": inverse_ambiguities,
         "external_dependencies": [
             {"uri": uri, "relation_predicates": sorted(predicates), "sources": sorted(external_sources[uri]), "assertions": [{"source": source, "triple_id": triple_id} for source, triple_id in sorted(external_assertions[uri])]}
             for uri, predicates in sorted(external.items())
         ],
         "dependencies": imports,
+        "resolved_namespaces": resolved_namespaces,
     }
 
 
@@ -106,6 +121,14 @@ def new_session(
         for item in queue.get("external_dependencies", [])  # type: ignore[union-attr]
         if item["uri"] not in {dependency["uri"] for dependency in dependencies}
     )
+    for dependency in dependencies:
+        matches = [
+            namespace
+            for namespace in queue.get("resolved_namespaces", [])  # type: ignore[union-attr]
+            if dependency["uri"].startswith(namespace["uri"])
+        ]
+        if len(matches) == 1:
+            dependency["namespace_resolved"] = matches[0]
     return {
         "format_version": "1.0",
         "assertion_policy": assertion_policy,
@@ -114,7 +137,7 @@ def new_session(
         "manifest_sha256": manifest_sha256,
         "queue_sha256": _sha256(queue),
         "queue": deepcopy(queue),
-        "choices": {"resources": resource_choices, "dependencies": dependencies, "assertions": {}, "references": {}, "required": {}},
+        "choices": {"resources": resource_choices, "inverse_pairs": {}, "dependencies": dependencies, "assertions": {}, "references": {}, "required": {}},
         "journal": [{"at": timestamp, "action": "session_created"}],
     }
 
@@ -134,7 +157,7 @@ def refresh_session(session: dict[str, object], queue: dict[str, object], *, man
     for item in choices["dependencies"]:
         if item["uri"] in previous:
             item.update({key: previous[item["uri"]][key] for key in ("id", "catalog_paths") if key in previous[item["uri"]]})
-    for kind in ("assertions", "references", "required", "resource_reasons", "field_mappings"):
+    for kind in ("inverse_pairs", "assertions", "references", "required", "resource_reasons", "field_mappings"):
         choices[kind] = old_choices.get(kind, {})
     session["queue"] = updated["queue"]
     session["queue_sha256"] = updated["queue_sha256"]
@@ -147,11 +170,32 @@ def active_dependencies(session: dict[str, object]) -> list[dict[str, object]]:
     choices = session["choices"]
     queue = session["queue"]
     assert isinstance(choices, dict) and isinstance(queue, dict)
+    selected, published, collapsed_inverse_triples = review_resource_sets(session)
+    ignored = {triple_id for decision in choices.get("assertions", {}).values() if decision.get("action") == "ignore" for triple_id in decision.get("triple_ids", []) if len(decision.get("triple_ids", [])) == 1}
+    active = {item["uri"] for item in queue.get("external_dependencies", []) if item["uri"] not in published and any(link["source"] in selected and link["triple_id"] not in ignored and link["triple_id"] not in collapsed_inverse_triples for link in item.get("assertions", []))}
+    return [item for item in choices["dependencies"] if item["uri"] in active and "namespace_resolved" not in item and choices.get("references", {}).get(item["uri"], {}).get("action") != "ignore"]
+
+
+def review_resource_sets(session: dict[str, object]) -> tuple[set[str], set[str], set[str]]:
+    """Return selected, exported, and absorbed inverse assertion identifiers."""
+    choices = session["choices"]
+    queue = session["queue"]
+    assert isinstance(choices, dict) and isinstance(queue, dict)
     selected = {uri for uri, choice in choices["resources"].items() if choice != "exclude"}
     published = {uri for uri, choice in choices["resources"].items() if choice == "publish"}
-    ignored = {triple_id for decision in choices.get("assertions", {}).values() if decision.get("action") == "ignore" for triple_id in decision.get("triple_ids", []) if len(decision.get("triple_ids", [])) == 1}
-    active = {item["uri"] for item in queue.get("external_dependencies", []) if item["uri"] not in published and any(link["source"] in selected and link["triple_id"] not in ignored for link in item.get("assertions", []))}
-    return [item for item in choices["dependencies"] if item["uri"] in active and choices.get("references", {}).get(item["uri"], {}).get("action") != "ignore"]
+    retained_pairs = [
+        (pair, decision)
+        for pair in queue.get("inverse_pairs", [])
+        if (decision := choices.get("inverse_pairs", {}).get(pair["id"], {})).get("action") == "retain"
+    ]
+    selected.update(decision["retained_uri"] for _, decision in retained_pairs)
+    published.update(decision["retained_uri"] for _, decision in retained_pairs)
+    collapsed_inverse_triples = {
+        triple_id
+        for pair, _ in retained_pairs
+        for triple_id in pair["triple_ids"]
+    }
+    return selected, published, collapsed_inverse_triples
 
 
 def load_session(path: str | Path) -> dict[str, object]:
@@ -281,6 +325,46 @@ def _imports(inventory: Inventory) -> list[dict[str, str]]:
             item["version"] = sorted(versions[uri])[0][1]
         result.append(item)
     return result
+
+
+def _inverse_pairs(inventory: Inventory, scoped_uris: set[str], resources: dict[str, object]) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """Return unambiguous local property pairs for one human decision each."""
+    edges: dict[tuple[str, str], set[str]] = {}
+    for triple in inventory.triples:
+        if (
+            triple.subject.kind == "uri"
+            and triple.subject.value in scoped_uris
+            and triple.predicate.value == f"{OWL}inverseOf"
+            and triple.object.kind == "uri"
+            and triple.object.value in scoped_uris
+        ):
+            edge = tuple(sorted((triple.subject.value, triple.object.value)))
+            edges.setdefault(edge, set()).add(triple.id)
+    neighbours: dict[str, set[str]] = {}
+    for first, second in edges:
+        neighbours.setdefault(first, set()).add(second)
+        neighbours.setdefault(second, set()).add(first)
+    pairs: list[dict[str, object]] = []
+    ambiguities: list[dict[str, object]] = []
+    for key, triple_ids in sorted(edges.items()):
+        source, target = key
+        source_resource = resources.get(source)
+        target_resource = resources.get(target)
+        if source_resource is None or target_resource is None:
+            continue
+        if not ({term.value for term in source_resource.types} & PROPERTY_TYPES and {term.value for term in target_resource.types} & PROPERTY_TYPES):
+            continue
+        if len(neighbours[source]) != 1 or len(neighbours[target]) != 1:
+            ambiguities.append({"uris": list(key), "triple_ids": sorted(triple_ids)})
+            continue
+        pair_id = "inverse-" + hashlib.sha256("|".join(key).encode()).hexdigest()[:12]
+        pairs.append({
+            "id": pair_id,
+            "uris": list(key),
+            "labels": {uri: _labels(resources[uri].id, inventory) for uri in key},
+            "triple_ids": sorted(triple_ids),
+        })
+    return pairs, ambiguities
 
 
 def _sha256(value: object) -> str:
